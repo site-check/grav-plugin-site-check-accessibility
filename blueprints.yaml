@@ -1,0 +1,60 @@
+name: Site-Check Accessibility
+slug: site-check-accessibility
+type: plugin
+version: 1.0.0
+description: "Verbindet eine Grav-Website mit der Site-Check Accessibility-Webapp und schreibt geprüfte Barrierefreiheits-Fixes serverseitig in die ausgelieferte Seite. Inkl. optionalem Assistenz-Overlay."
+icon: universal-access
+author:
+  name: site-works.de
+  email: kontakt@site-check.de
+  url: https://site-check.de
+homepage: https://site-check.de
+docs: https://github.com/site-check/grav-plugin-site-check-accessibility#readme
+bugs: https://github.com/site-check/grav-plugin-site-check-accessibility/issues
+keywords: accessibility, a11y, wcag, bfsg, barrierefreiheit, overlay, connector
+license: MIT
+dependencies:
+  - { name: grav, version: '>=1.7.0' }
+  - { name: php, version: '>=8.0' }
+
+# Grav major lines this release has been tested against. Without this block GPM
+# infers "1.7 only" from the dependency constraint above and hides the plugin
+# from Grav 2.0 installs. The dependency stays at >=1.7.0 (minimum API gate);
+# compatibility declares the tested majors.
+compatibility:
+  grav:
+    - '1.7'
+    - '2.0'
+
+form:
+  validation: strict
+  fields:
+    connect_section:
+      type: section
+      title: Website-Verbindung
+      underline: true
+      fields:
+        connect_panel:
+          type: connectpanel
+          label: false
+
+    runtime_section:
+      type: section
+      title: Technische Einstellungen
+      underline: true
+      fields:
+        enabled:
+          type: toggle
+          label: Plugin aktiviert
+          help: Wenn deaktiviert, sind Connector, Overlay und Runtime-Overrides ausgeschaltet.
+          highlight: 1
+          default: 1
+          options:
+            1: AN
+            0: AUS
+          validate:
+            type: bool
+
+        # overlay_runtime_enabled wird im Connector-Panel oben als Toggle
+        # „Assistenz-Overlay erlauben" verwaltet (set-overlay-Endpunkt).
+        # Der Config-Wert bleibt bestehen; hier bewusst kein doppeltes Feld.

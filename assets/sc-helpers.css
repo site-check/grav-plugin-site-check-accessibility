@@ -1,0 +1,49 @@
+/*!
+ * Site-Check Accessibility Helpers
+ * Auto-injected by the Site-Check Accessibility plugin when cache.json
+ * contains at least one fix that declares requiresHelpers.
+ *
+ * Namespace: sc- (site-check). Keep classes minimal and generic.
+ */
+
+/* Visually-hidden content that stays exposed to assistive tech.
+ * Used by the complex-graphic long-description fix (aria-describedby target).
+ */
+.sc-sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+/* Focusable variant for skip-links that must become visible on focus.
+ * Reserved for future fixes; ships now so plugin-side changes happen once.
+ */
+.sc-sr-only-focusable:not(:focus):not(:focus-within) {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+/* Bundled-Form-Fix (2.1.2): "* = Pflichtfeld"-Legende, die der
+ * html_insert_before-Op vor den ersten Pflichtfeld-Container einsetzt.
+ * Bleibt visuell zurückhaltend (kleine Schrift, erbt die Textfarbe) damit
+ * sie nicht mit dem Form-Styling kollidiert. Author-Overrides sind durch
+ * den expliziten Klassennamen problemlos möglich.
+ */
+.sc-form-legend {
+  font-size: 0.875em;
+  color: inherit;
+  margin: 0 0 0.5em 0;
+}

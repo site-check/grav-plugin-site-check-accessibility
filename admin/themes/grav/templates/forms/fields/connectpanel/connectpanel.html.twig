@@ -1,0 +1,102 @@
+{% extends "forms/field.html.twig" %}
+
+{# Site-Check Connector — shared admin panel kit (Grav adapter).
+   Design + behaviour live in sc-connector.css / sc-connector.js (this dir),
+   kept in sync with .plugin/_shared/connector-ui/. The PHP injects both files
+   inline via buildAdminConnectPanelState() so the panel stays self-contained. #}
+{# The state comes from a plugin-registered Twig function (see
+   SiteCheckAccessibilityPlugin::onTwigInitialized). Calling the plugin method
+   directly on the object does not resolve through Grav's admin Twig. #}
+{% set connect = sw_acc_admin_connect_state() %}
+{# V1 hardcoded — must stay in sync with SiteCheckAccessibilityPlugin::WEBAPP_BASE_URL #}
+{% set webappBaseUrlFallback = 'https://site-check.de' %}
+{% set resolvedWebappBaseUrl = connect.webappBaseUrl|default('') ?: webappBaseUrlFallback %}
+{% set scStatus = connect.status|default('not_connected') %}
+{% set scState = scStatus == 'connected' ? 'connected' : (scStatus == 'error' ? 'interrupted' : 'disconnected') %}
+{% set scBase = resolvedWebappBaseUrl|trim('/') %}
+
+{% block field %}
+  <div class="form-field">
+    <div class="scc" data-sc-panel
+      data-state="{{ scState }}"
+      data-initial-status="{{ scStatus|e('html_attr') }}"
+      data-initial-notice="{{ connect.lastNotice|default('')|e('html_attr') }}"
+      data-initial-error="{{ connect.lastError|default('')|e('html_attr') }}"
+      data-connect-endpoint="{{ connect.adminConnectEndpoint|default('')|e('html_attr') }}"
+      data-disconnect-endpoint="{{ connect.adminDisconnectEndpoint|default('')|e('html_attr') }}"
+      data-status-endpoint="{{ connect.adminStatusEndpoint|default('')|e('html_attr') }}"
+      data-overlay-endpoint="{{ connect.adminOverlayEndpoint|default('')|e('html_attr') }}"
+      data-webapp-status-endpoint="{{ connect.adminWebappStatusEndpoint|default('')|e('html_attr') }}"
+      data-webapp-base-url="{{ resolvedWebappBaseUrl|e('html_attr') }}"
+      data-csrf="{{ connect.csrfToken|default('')|e('html_attr') }}" data-csrf-header="{{ connect.csrfHeader|default('')|e('html_attr') }}"
+    >
+      <style>{{ connect.kitCss|raw }}</style>
+
+      {# Brand bar #}
+      <div class="scc-brandbar">
+        <svg class="scc-brandbar__logo" viewBox="0 0 200 31.31" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="site-check"><polygon fill="#6d961d" points="194.32 8.66 185.94 18.41 183.16 15.09 177.48 15.09 185.67 24.97 200 8.66 194.32 8.66"></polygon><g fill="#141613"><path d="M6.43,14.58c.51-.29,1.24-.43,2.19-.43,1,0,1.89.19,2.66.56.77.37,1.46.93,2.06,1.67l3-3c-.86-1.17-1.92-2.05-3.2-2.64-1.27-.59-2.74-.88-4.4-.88-1.57,0-2.92.26-4.05.77-1.13.52-2,1.24-2.62,2.19-.62.94-.92,2.07-.92,3.39,0,1.23.26,2.23.77,3,.52.77,1.18,1.38,1.99,1.82.81.44,1.67.79,2.57,1.05.9.26,1.76.51,2.57.75.81.24,1.48.54,1.99.88s.77.83.77,1.46-.27,1.06-.81,1.37c-.54.31-1.34.47-2.4.47-1.17,0-2.22-.21-3.15-.62-.93-.41-1.75-1.04-2.47-1.87l-3,3c.66.8,1.43,1.48,2.32,2.04.89.56,1.86.99,2.92,1.29,1.06.3,2.16.45,3.3.45,2.4,0,4.3-.59,5.7-1.76,1.4-1.17,2.1-2.76,2.1-4.76,0-1.26-.26-2.28-.77-3.07-.51-.79-1.18-1.42-1.99-1.89-.81-.47-1.67-.84-2.57-1.11-.9-.27-1.76-.52-2.57-.75-.81-.23-1.48-.5-1.99-.81s-.77-.76-.77-1.33c0-.54.26-.96.77-1.24Z"></path><rect x="20.29" y="10.29" width="4.72" height="20.59"></rect><path d="M22.65.86c-.8,0-1.47.27-1.99.81-.53.54-.79,1.22-.79,2.02s.26,1.47.79,2.02c.53.54,1.19.81,1.99.81s1.5-.27,2.02-.81c.51-.54.77-1.21.77-2.02s-.26-1.47-.77-2.02c-.51-.54-1.19-.81-2.02-.81Z"></path><polygon points="38.13 1.72 33.41 1.72 33.41 10.29 28.48 10.29 28.48 14.58 33.41 14.58 33.41 30.88 38.13 30.88 38.13 14.58 43.06 14.58 43.06 10.29 38.13 10.29 38.13 1.72"></polygon><path d="M60.88,11.2c-1.47-.89-3.17-1.33-5.08-1.33s-3.77.47-5.38,1.42c-1.62.94-2.9,2.22-3.84,3.84-.94,1.62-1.42,3.44-1.42,5.47s.48,3.86,1.44,5.49c.96,1.63,2.26,2.91,3.9,3.84,1.64.93,3.5,1.39,5.55,1.39,1.6,0,3.12-.3,4.55-.9,1.43-.6,2.64-1.49,3.65-2.66l-3-3.05c-.63.72-1.39,1.26-2.29,1.63-.9.37-1.88.56-2.94.56-1.23,0-2.32-.26-3.26-.79-.94-.53-1.67-1.28-2.19-2.25-.25-.46-.43-.97-.56-1.5h15.35c.09-.43.15-.82.19-1.18.04-.36.07-.71.07-1.05,0-1.97-.42-3.73-1.27-5.28-.84-1.54-2-2.76-3.47-3.65ZM50.52,17.14c.49-.93,1.17-1.65,2.06-2.17.89-.52,1.93-.77,3.13-.77s2.11.23,2.9.69c.79.46,1.39,1.12,1.82,1.97.24.48.41,1.03.54,1.63h-10.94c.12-.48.28-.94.5-1.35Z"></path><rect x="69.4" y="17.71" width="14.54" height="4.46"></rect><path d="M95.54,15.21c.9-.53,1.94-.79,3.11-.79,1,0,1.92.18,2.77.54.84.36,1.57.89,2.17,1.61l3.09-3.13c-.97-1.14-2.15-2.02-3.54-2.64-1.39-.61-2.88-.92-4.48-.92-2.03,0-3.87.47-5.51,1.42-1.64.94-2.94,2.22-3.88,3.84-.94,1.62-1.42,3.44-1.42,5.47s.47,3.82,1.42,5.45c.94,1.63,2.24,2.92,3.88,3.86,1.64.94,3.48,1.42,5.51,1.42,1.6,0,3.09-.31,4.48-.92,1.39-.61,2.57-1.49,3.54-2.64l-3.09-3.13c-.6.71-1.32,1.25-2.17,1.61-.84.36-1.77.54-2.77.54-1.17,0-2.21-.26-3.11-.79-.9-.53-1.6-1.26-2.1-2.19-.5-.93-.75-1.99-.75-3.2s.25-2.3.75-3.22c.5-.91,1.2-1.64,2.1-2.17Z"></path><path d="M125.03,10.9c-1.2-.69-2.57-1.03-4.12-1.03s-2.88.35-4.1,1.05c-.8.46-1.47,1.04-2.04,1.72V0h-4.72v30.88h4.72v-11.88c0-.91.2-1.73.6-2.44.4-.71.96-1.27,1.67-1.67.71-.4,1.53-.6,2.45-.6,1.37,0,2.49.44,3.37,1.33.87.89,1.31,2.02,1.31,3.39v11.88h4.72v-12.91c0-1.6-.34-3.01-1.03-4.22-.69-1.22-1.63-2.17-2.83-2.85Z"></path><path d="M148.08,11.2c-1.47-.89-3.17-1.33-5.08-1.33s-3.77.47-5.38,1.42-2.89,2.22-3.84,3.84c-.94,1.62-1.42,3.44-1.42,5.47s.48,3.86,1.44,5.49c.96,1.63,2.26,2.91,3.9,3.84,1.64.93,3.5,1.39,5.55,1.39,1.6,0,3.12-.3,4.55-.9,1.43-.6,2.64-1.49,3.65-2.66l-3-3.05c-.63.72-1.39,1.26-2.29,1.63-.9.37-1.88.56-2.94.56-1.23,0-2.32-.26-3.26-.79-.94-.53-1.67-1.28-2.19-2.25-.25-.46-.43-.97-.56-1.5h15.35c.09-.43.15-.82.19-1.18.04-.36.06-.71.06-1.05,0-1.97-.42-3.73-1.27-5.28-.84-1.54-2-2.76-3.47-3.65ZM137.72,17.14c.49-.93,1.17-1.65,2.06-2.17.89-.52,1.93-.77,3.13-.77s2.11.23,2.9.69c.79.46,1.39,1.12,1.82,1.97.24.48.41,1.03.54,1.63h-10.94c.12-.48.28-.94.5-1.35Z"></path><path d="M162.96,15.21c.9-.53,1.94-.79,3.11-.79,1,0,1.92.18,2.77.54.84.36,1.57.89,2.17,1.61l3.09-3.13c-.97-1.14-2.15-2.02-3.54-2.64-1.39-.61-2.88-.92-4.48-.92-2.03,0-3.87.47-5.51,1.42-1.64.94-2.94,2.22-3.88,3.84-.94,1.62-1.42,3.44-1.42,5.47s.47,3.82,1.42,5.45c.94,1.63,2.24,2.92,3.88,3.86,1.64.94,3.48,1.42,5.51,1.42,1.6,0,3.09-.31,4.48-.92,1.39-.61,2.57-1.49,3.54-2.64l-3.09-3.13c-.6.71-1.32,1.25-2.17,1.61-.84.36-1.77.54-2.77.54-1.17,0-2.21-.26-3.11-.79-.9-.53-1.6-1.26-2.1-2.19-.5-.93-.75-1.99-.75-3.2s.25-2.3.75-3.22c.5-.91,1.2-1.64,2.1-2.17Z"></path><polygon points="177.48 11.42 177.48 11.42 182.2 11.42 182.2 0 177.48 0 177.48 11.42"></polygon><polygon points="177.48 30.88 182.2 30.88 182.2 26.55 177.48 20.86 177.48 30.88"></polygon><polygon points="191.06 24.4 188.04 27.84 190.56 30.88 196.57 30.88 191.06 24.4"></polygon></g></svg>
+        <div class="scc-brandbar__sep"></div>
+        <div class="scc-brandbar__name">Grav <span class="scc-brandbar__ver">v{{ connect.pluginVersion|default('1.0.0')|e('html_attr') }}</span></div>
+        <div class="scc-brandbar__spacer"></div>
+      </div>
+
+      {# Hero #}
+      <section class="scc-hero">
+        <div class="scc-hero__in">
+          <div class="scc-hero__top">
+            <div>
+              <h1 class="scc-h1 scc-hero__title">Accessibility Connector</h1>
+              <p class="scc-hero__lead" data-sc-hero-lead>Site-Check wendet geprüfte Barrierefreiheits-Fixes automatisch an. Verbinde die Website mit deinem Site-Check-Konto, um loszulegen.</p>
+            </div>
+            <div class="scc-signal" data-sc-signal data-tone="neutral" role="status" aria-live="polite">
+              <span class="scc-signal__label" data-sc-signal-label>Nicht verbunden</span>
+              <span class="scc-lampwrap" aria-hidden="true"><span class="scc-lamp"></span></span>
+            </div>
+          </div>
+
+          <p class="scc-newhint"><strong>Neu bei Site-Check?</strong> Barrierefreiheit prüfen und Fixes automatisch anwenden — <a href="{{ scBase }}/register" target="_blank" rel="noreferrer noopener">jetzt registrieren&nbsp;↗</a>.</p>
+
+          <div class="scc-hero__manage">
+            <button type="button" class="scc-btn scc-btn--secondary scc-btn--sm" data-sc-refresh>Status aktualisieren</button>
+            <button type="button" class="scc-btn scc-btn--danger scc-btn--sm scc-btn--disconnect" data-sc-disconnect>Verbindung trennen</button>
+          </div>
+        </div>
+      </section>
+
+      {# Verbinden #}
+      <div class="scc-connect">
+        <section class="scc-card">
+          <h2 class="scc-h2 scc-card__t" data-sc-connect-title>Diese Website mit Site-Check verbinden</h2>
+          <p class="scc-card__c">Füge den Verbindungscode aus deiner Site-Check-Webapp ein und klicke auf <strong>Jetzt verbinden</strong>. Den Code bekommst du im Verbindungs-Assistenten der Webapp.</p>
+          <label class="scc-label" for="sc-acc-pairing-code">Verbindungscode</label>
+          <div class="scc-connect-row">
+            <input class="scc-input" id="sc-acc-pairing-code" name="pairingCode" type="text" placeholder="Code aus der Webapp einfügen" autocomplete="off" spellcheck="false" data-sc-code aria-describedby="sc-acc-code-fb">
+            <button type="button" class="scc-btn scc-btn--accent scc-btn--connect" data-sc-connect>Jetzt verbinden</button>
+          </div>
+          <div class="scc-fb" id="sc-acc-code-fb" data-sc-code-fb aria-live="polite"></div>
+          <div class="scc-note" data-sc-note></div>
+        </section>
+      </div>
+
+      {# Einstellungen #}
+      <section class="scc-settings">
+        <h2 class="scc-h2 scc-settings__t">Einstellungen</h2>
+        <p class="scc-settings__c">Technische Grundeinstellungen des Connectors.</p>
+        <div class="scc-row">
+          <div><h3 class="scc-h3 scc-row__t">Assistenz-Overlay erlauben</h3><div class="scc-row__x">Erlaubt der Webapp, das Site-Check-Bedienhilfen-Overlay für Besucher:innen einzublenden.</div></div>
+          <button type="button" class="scc-toggle" data-sc-overlay-toggle aria-pressed="{{ connect.overlayRuntimeEnabled|default(true) ? 'true' : 'false' }}" aria-label="Assistenz-Overlay erlauben"></button>
+        </div>
+      </section>
+
+      {# Footer #}
+      <div class="scc-foot">
+        <span class="scc-foot__brand">
+          <svg width="88" height="14" viewBox="0 0 200 31.31" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><polygon fill="#6d961d" points="194.32 8.66 185.94 18.41 183.16 15.09 177.48 15.09 185.67 24.97 200 8.66 194.32 8.66"></polygon><g fill="currentColor"><path d="M6.43,14.58c.51-.29,1.24-.43,2.19-.43,1,0,1.89.19,2.66.56.77.37,1.46.93,2.06,1.67l3-3c-.86-1.17-1.92-2.05-3.2-2.64-1.27-.59-2.74-.88-4.4-.88-1.57,0-2.92.26-4.05.77-1.13.52-2,1.24-2.62,2.19-.62.94-.92,2.07-.92,3.39,0,1.23.26,2.23.77,3,.52.77,1.18,1.38,1.99,1.82.81.44,1.67.79,2.57,1.05.9.26,1.76.51,2.57.75.81.24,1.48.54,1.99.88s.77.83.77,1.46-.27,1.06-.81,1.37c-.54.31-1.34.47-2.4.47-1.17,0-2.22-.21-3.15-.62-.93-.41-1.75-1.04-2.47-1.87l-3,3c.66.8,1.43,1.48,2.32,2.04.89.56,1.86.99,2.92,1.29,1.06.3,2.16.45,3.3.45,2.4,0,4.3-.59,5.7-1.76,1.4-1.17,2.1-2.76,2.1-4.76,0-1.26-.26-2.28-.77-3.07-.51-.79-1.18-1.42-1.99-1.89-.81-.47-1.67-.84-2.57-1.11-.9-.27-1.76-.52-2.57-.75-.81-.23-1.48-.5-1.99-.81s-.77-.76-.77-1.33c0-.54.26-.96.77-1.24Z"></path><rect x="20.29" y="10.29" width="4.72" height="20.59"></rect><path d="M22.65.86c-.8,0-1.47.27-1.99.81-.53.54-.79,1.22-.79,2.02s.26,1.47.79,2.02c.53.54,1.19.81,1.99.81s1.5-.27,2.02-.81c.51-.54.77-1.21.77-2.02s-.26-1.47-.77-2.02c-.51-.54-1.19-.81-2.02-.81Z"></path><polygon points="38.13 1.72 33.41 1.72 33.41 10.29 28.48 10.29 28.48 14.58 33.41 14.58 33.41 30.88 38.13 30.88 38.13 14.58 43.06 14.58 43.06 10.29 38.13 10.29 38.13 1.72"></polygon><path d="M60.88,11.2c-1.47-.89-3.17-1.33-5.08-1.33s-3.77.47-5.38,1.42c-1.62.94-2.9,2.22-3.84,3.84-.94,1.62-1.42,3.44-1.42,5.47s.48,3.86,1.44,5.49c.96,1.63,2.26,2.91,3.9,3.84,1.64.93,3.5,1.39,5.55,1.39,1.6,0,3.12-.3,4.55-.9,1.43-.6,2.64-1.49,3.65-2.66l-3-3.05c-.63.72-1.39,1.26-2.29,1.63-.9.37-1.88.56-2.94.56-1.23,0-2.32-.26-3.26-.79-.94-.53-1.67-1.28-2.19-2.25-.25-.46-.43-.97-.56-1.5h15.35c.09-.43.15-.82.19-1.18.04-.36.07-.71.07-1.05,0-1.97-.42-3.73-1.27-5.28-.84-1.54-2-2.76-3.47-3.65ZM50.52,17.14c.49-.93,1.17-1.65,2.06-2.17.89-.52,1.93-.77,3.13-.77s2.11.23,2.9.69c.79.46,1.39,1.12,1.82,1.97.24.48.41,1.03.54,1.63h-10.94c.12-.48.28-.94.5-1.35Z"></path><rect x="69.4" y="17.71" width="14.54" height="4.46"></rect><path d="M95.54,15.21c.9-.53,1.94-.79,3.11-.79,1,0,1.92.18,2.77.54.84.36,1.57.89,2.17,1.61l3.09-3.13c-.97-1.14-2.15-2.02-3.54-2.64-1.39-.61-2.88-.92-4.48-.92-2.03,0-3.87.47-5.51,1.42-1.64.94-2.94,2.22-3.88,3.84-.94,1.62-1.42,3.44-1.42,5.47s.47,3.82,1.42,5.45c.94,1.63,2.24,2.92,3.88,3.86,1.64.94,3.48,1.42,5.51,1.42,1.6,0,3.09-.31,4.48-.92,1.39-.61,2.57-1.49,3.54-2.64l-3.09-3.13c-.6.71-1.32,1.25-2.17,1.61-.84.36-1.77.54-2.77.54-1.17,0-2.21-.26-3.11-.79-.9-.53-1.6-1.26-2.1-2.19-.5-.93-.75-1.99-.75-3.2s.25-2.3.75-3.22c.5-.91,1.2-1.64,2.1-2.17Z"></path><path d="M125.03,10.9c-1.2-.69-2.57-1.03-4.12-1.03s-2.88.35-4.1,1.05c-.8.46-1.47,1.04-2.04,1.72V0h-4.72v30.88h4.72v-11.88c0-.91.2-1.73.6-2.44.4-.71.96-1.27,1.67-1.67.71-.4,1.53-.6,2.45-.6,1.37,0,2.49.44,3.37,1.33.87.89,1.31,2.02,1.31,3.39v11.88h4.72v-12.91c0-1.6-.34-3.01-1.03-4.22-.69-1.22-1.63-2.17-2.83-2.85Z"></path><path d="M148.08,11.2c-1.47-.89-3.17-1.33-5.08-1.33s-3.77.47-5.38,1.42-2.89,2.22-3.84,3.84c-.94,1.62-1.42,3.44-1.42,5.47s.48,3.86,1.44,5.49c.96,1.63,2.26,2.91,3.9,3.84,1.64.93,3.5,1.39,5.55,1.39,1.6,0,3.12-.3,4.55-.9,1.43-.6,2.64-1.49,3.65-2.66l-3-3.05c-.63.72-1.39,1.26-2.29,1.63-.9.37-1.88.56-2.94.56-1.23,0-2.32-.26-3.26-.79-.94-.53-1.67-1.28-2.19-2.25-.25-.46-.43-.97-.56-1.5h15.35c.09-.43.15-.82.19-1.18.04-.36.06-.71.06-1.05,0-1.97-.42-3.73-1.27-5.28-.84-1.54-2-2.76-3.47-3.65ZM137.72,17.14c.49-.93,1.17-1.65,2.06-2.17.89-.52,1.93-.77,3.13-.77s2.11.23,2.9.69c.79.46,1.39,1.12,1.82,1.97.24.48.41,1.03.54,1.63h-10.94c.12-.48.28-.94.5-1.35Z"></path><path d="M162.96,15.21c.9-.53,1.94-.79,3.11-.79,1,0,1.92.18,2.77.54.84.36,1.57.89,2.17,1.61l3.09-3.13c-.97-1.14-2.15-2.02-3.54-2.64-1.39-.61-2.88-.92-4.48-.92-2.03,0-3.87.47-5.51,1.42-1.64.94-2.94,2.22-3.88,3.84-.94,1.62-1.42,3.44-1.42,5.47s.47,3.82,1.42,5.45c.94,1.63,2.24,2.92,3.88,3.86,1.64.94,3.48,1.42,5.51,1.42,1.6,0,3.09-.31,4.48-.92,1.39-.61,2.57-1.49,3.54-2.64l-3.09-3.13c-.6.71-1.32,1.25-2.17,1.61-.84.36-1.77.54-2.77.54-1.17,0-2.21-.26-3.11-.79-.9-.53-1.6-1.26-2.1-2.19-.5-.93-.75-1.99-.75-3.2s.25-2.3.75-3.22c.5-.91,1.2-1.64,2.1-2.17Z"></path><polygon points="177.48 11.42 177.48 11.42 182.2 11.42 182.2 0 177.48 0 177.48 11.42"></polygon><polygon points="177.48 30.88 182.2 30.88 182.2 26.55 177.48 20.86 177.48 30.88"></polygon><polygon points="191.06 24.4 188.04 27.84 190.56 30.88 196.57 30.88 191.06 24.4"></polygon></g></svg>
+        </span>
+        <span>Problem entdeckt? <a href="https://site-check.de/#kontakt" target="_blank" rel="noreferrer noopener">Support kontaktieren</a></span>
+      </div>
+    </div>
+
+    <script>{{ connect.kitJs|raw }}</script>
+  </div>
+{% endblock %}

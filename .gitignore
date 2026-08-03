@@ -1,0 +1,11 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# NOTE: vendor/ is intentionally committed — the Grav Package Manager installs
+# the plugin from the release ZIP and does NOT run Composer, so the bundled
+# libraries (masterminds/html5, paragonie/sodium_compat) must ship with it.
