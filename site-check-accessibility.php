@@ -31,7 +31,7 @@ require_once __DIR__ . '/lib/ServerHtmlMutator.php';
 
 class SiteCheckAccessibilityPlugin extends Plugin
 {
-    private const PLUGIN_VERSION = '1.0.0';
+    private const PLUGIN_VERSION = '1.0.1';
     // Block-level tags that receive a data-sw-block-id marker for
     // block-scoped structural fixes.
     private const STABLE_BLOCK_TAGS = ['p', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'td', 'figcaption', 'blockquote', 'dt', 'dd'];
@@ -142,7 +142,7 @@ class SiteCheckAccessibilityPlugin extends Plugin
                 return;
             }
         } catch (\Throwable $e) {
-            $this->grav['log']->error('[SiteCheckAccessibility] Plugin Error: ' . $e->getMessage(), [
+            $this->grav['log']->error('[site-check] Plugin Error: ' . $e->getMessage(), [
                 'trace' => $e->getTraceAsString(),
             ]);
 
@@ -529,7 +529,7 @@ class SiteCheckAccessibilityPlugin extends Plugin
             $this->grav->output = $this->applyOutputMutations($output);
         } catch (\Throwable $e) {
             try {
-                $this->grav['log']->error('[SiteCheckAccessibility] onOutputGenerated failed, original output delivered: ' . $e->getMessage());
+                $this->grav['log']->error('[site-check] onOutputGenerated failed, original output delivered: ' . $e->getMessage());
             } catch (\Throwable $ignored) {
                 // Logging must never itself defeat the fail-open guarantee.
             }
@@ -583,8 +583,10 @@ class SiteCheckAccessibilityPlugin extends Plugin
         $output = $this->injectTagReplaceBootstrap($output, $currentPageUrl, $overrides);
         $output = $this->injectElementReplaceBootstrap($output, $currentPageUrl, $overrides);
         $output = $this->injectElementRemoveBootstrap($output, $currentPageUrl, $overrides);
-        // 1.4.0 WCAG-Phase-0 fix types — all three are pure client-side
-        // <script> bootstraps (no server-side re-serialization, 1.2.3 rule).
+        // 1.4.0 WCAG-Phase-0 fix types — inject the client <script> bootstraps
+        // (fallback for DOM the target site's own JavaScript creates after
+        // delivery; static markup is handled by the server-side pass where
+        // supported).
         $output = $this->injectSrOnlyInsertBootstrap($output, $currentPageUrl, $overrides);
         $output = $this->injectCssRuleInjectBootstrap($output, $currentPageUrl, $overrides);
         $output = $this->injectElementInsertBootstrap($output, $currentPageUrl, $overrides);
@@ -1271,11 +1273,12 @@ class SiteCheckAccessibilityPlugin extends Plugin
                 ], $exchangeResponse['status'] ?? 502);
             }
 
-            $website = is_array($exchangeData['website'] ?? null) ? $exchangeData['website'] : [];
-            $connectorAuth = is_array($exchangeData['connectorAuth'] ?? null) ? $exchangeData['connectorAuth'] : [];
+            // The webapp's exchange response carries the connector credentials
+            // under `data.connection.*` (same shape as the WP/Joomla/TYPO3
+            // connectors read).
             $connection = is_array($exchangeData['connection'] ?? null) ? $exchangeData['connection'] : [];
-            $websiteId = trim((string) (($website['id'] ?? '') ?: ($connection['websiteId'] ?? '')));
-            $apiToken = trim((string) (($connectorAuth['apiToken'] ?? '') ?: ($connection['apiToken'] ?? '')));
+            $websiteId = trim((string) ($connection['websiteId'] ?? ''));
+            $apiToken = trim((string) ($connection['apiToken'] ?? ''));
 
             if ($websiteId === '' || $apiToken === '') {
                 $this->writeConnectionState([
@@ -1432,7 +1435,7 @@ class SiteCheckAccessibilityPlugin extends Plugin
                 sleep(2);
                 $this->callWebappJson('/api/connectors/grav/plugin-disconnected', $options);
             } catch (\Throwable $secondError) {
-                $this->grav['log']->warning('[SiteCheckAccessibility] disconnect-notify failed twice: ' . $secondError->getMessage());
+                $this->grav['log']->warning('[site-check] disconnect-notify failed twice: ' . $secondError->getMessage());
             }
         }
     }
@@ -4574,7 +4577,7 @@ class SiteCheckAccessibilityPlugin extends Plugin
     private function hardenDataDir(string $dir): void
     {
         $drops = [
-            '.htaccess' => "Require all denied\n<IfModule !mod_authz_core.c>\nOrder allow,deny\nDeny from all\n</IfModule>\n",
+            '.htaccess' => "<IfModule mod_authz_core.c>\nRequire all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\nOrder allow,deny\nDeny from all\n</IfModule>\n",
             'index.html' => "",
             'web.config' => "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<configuration>\n  <system.webServer>\n    <authorization>\n      <deny users=\"*\" />\n    </authorization>\n  </system.webServer>\n</configuration>\n",
         ];
@@ -4860,7 +4863,7 @@ class SiteCheckAccessibilityPlugin extends Plugin
      * POST /plugin/sw-acc-connector/clear-cache
      * Operator-triggered cache wipe. Deletes cache.json + cache-state.json
      * so the plugin delivers no overrides until the next /sync-push.
-     * Auth-protected (same Bearer/_token mechanism as /sync-push). Triggered
+     * Auth-protected (same header-token mechanism as /sync-push). Triggered
      * from the webapp admin "Danger Zone" modal — never auto-fired.
      */
     private function handleClearCacheEndpoint(): void

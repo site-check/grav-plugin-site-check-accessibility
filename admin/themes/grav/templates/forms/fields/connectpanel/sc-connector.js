@@ -1,15 +1,11 @@
 /* =========================================================================
-   Site-Check Connector — Shared Admin Panel Kit (JS)
-   Single source of truth. Each plugin ships its OWN copy of this file;
-   keep in sync with .plugin/_shared/connector-ui/.
+   Site-Check Accessibility — Connector Admin Panel (JS)
 
    Transport-agnostic: reads its endpoints + state from data-* on the root
    [data-sc-panel] element. When endpoints are present it drives connect /
    disconnect / status-poll / overlay-toggle via fetch (live-async). When an
    endpoint is absent the matching <form> keeps its native server POST as a
    no-JS fallback.
-
-   Derived from the proven Grav connect-panel logic, generalized across CMS.
    ========================================================================= */
 (function () {
   var panels = document.querySelectorAll('[data-sc-panel]');
@@ -318,10 +314,9 @@
 
     function bindSubmit(btn, handler) {
       if (!btn) { return; }
-      // The connect/disconnect buttons are type="button" and live inside the
-      // CMS admin form, so a click never triggers that form's submit event.
-      // Bind directly to the button click; the handler calls preventDefault()
-      // itself once an async endpoint is wired.
+      // The connect/disconnect controls are <button type="button"> (no enclosing
+      // form), so bind the action to the button's click — doConnect/doDisconnect
+      // call preventDefault themselves. Binding to a form's submit never fired.
       btn.addEventListener('click', handler);
     }
 

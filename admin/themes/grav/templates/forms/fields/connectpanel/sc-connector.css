@@ -1,14 +1,12 @@
 /* =========================================================================
-   Site-Check Connector — Shared Admin Panel Kit (CSS)
-   Single source of truth. Each plugin ships its OWN copy of this file in its
-   asset pipeline; keep them in sync with .plugin/_shared/connector-ui/.
-   Design reference: sc-connector-ui mockup (light-only, three states).
+   Site-Check Accessibility — Connector Admin Panel (CSS)
+   Light-only, three states (connected / interrupted / disconnected).
    Tokens are scoped to .scc (NOT :root) so they never clash with the host
    CMS admin theme.
    ========================================================================= */
 
 .scc{
-  /* Farbe */
+  /* Colors */
   --scc-ink:#141613; --scc-ink-2:#39402f; --scc-muted:#5c6553; --scc-faint:#8b937d;
   --scc-surface:#ffffff; --scc-surface-2:#f6f8f0;
   --scc-border:#e4e8db; --scc-border-strong:#d6ddc7;

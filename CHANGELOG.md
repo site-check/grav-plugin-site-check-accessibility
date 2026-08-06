@@ -1,3 +1,12 @@
+# v1.0.1
+## 08/04/2026
+
+1. [](#improved)
+    * Maintenance / store-consistency release — no change to pairing, fixes or overlay behaviour.
+    * Unified the connector admin panel with the other Site-Check connectors (shared UI kit); cosmetic only.
+    * Pairing response is now read from the canonical `connection.*` fields; removed a dead legacy parsing branch.
+    * Normalised the PHP log label to `[site-check]` and set author/copyright metadata to "site-works AG".
+
 # v1.0.0
 ## 08/03/2026
 
