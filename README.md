@@ -44,9 +44,9 @@ Fixes automatisch beim nächsten Seitenaufruf.
 
 ### Voraussetzungen
 
-- Grav **1.7** oder **2.0**
+- Grav **1.7** oder **2.x** (getestet mit 2.2.2)
 - PHP **8.0** oder neuer mit der `dom`-Erweiterung (Standard bei den meisten
-  Hostern; Grav 2.0 setzt selbst PHP 8.3+ voraus)
+  Hostern; Grav 2 setzt selbst PHP 8.3+ voraus)
 
 ### Konfiguration
 
@@ -59,6 +59,34 @@ Site-Check Accessibility**:
   Website an/aus.
 - **Plugin aktiviert** — globaler Schalter; deaktiviert Connector, Overlay und
   Runtime-Overrides.
+
+### Hinter einem Reverse-Proxy
+
+Endet HTTPS schon an einem vorgeschalteten Proxy (z. B. Docker mit Traefik oder
+Caddy, nginx vor Apache, Load Balancer), kennt Grav seine öffentliche Adresse nur
+aus den `X-Forwarded-*`-Headern des Proxys. **Grav 2 wertet diese Header ab Werk
+nicht aus**, Grav 1.7 übernimmt `X-Forwarded-Proto` und `X-Forwarded-Port`. Grav
+meldet sich dann als `http://…` oder mit dem internen Port, und das Verbinden
+scheitert mit „pluginBaseUrl passt nicht zur erwarteten Website-URL“. Das Panel
+nennt in diesem Fall beide Adressen.
+
+Abhilfe in `user/config/system.yaml`, eine der beiden Varianten:
+
+```yaml
+# A: die öffentliche Adresse fest eintragen
+custom_base_url: 'https://www.example.com'
+```
+
+```yaml
+# B: die Header des Proxys übernehmen – nur, wenn der Proxy sie selbst setzt
+# und überschreibt, sonst können Besucher sie fälschen
+http_x_forwarded:
+  protocol: true           # X-Forwarded-Proto
+  port: true               # X-Forwarded-Port, falls der Proxy ihn sendet
+reverse_proxy_setup: true  # nur bei internem Port wie :8080 ohne X-Forwarded-Port
+```
+
+Danach erneut verbinden.
 
 ### Datenschutz / Datenübertragung
 
@@ -101,8 +129,8 @@ load.
 
 ### Requirements
 
-- Grav **1.7** or **2.0**
-- PHP **8.0** or newer with the `dom` extension (Grav 2.0 itself requires PHP 8.3+)
+- Grav **1.7** or **2.x** (tested with 2.2.2)
+- PHP **8.0** or newer with the `dom` extension (Grav 2 itself requires PHP 8.3+)
 
 ### Configuration
 
@@ -114,6 +142,34 @@ Accessibility**:
 - **Allow assistance overlay** — toggles the optional overlay for the site.
 - **Plugin enabled** — global switch; turns off the connector, overlay and
   runtime overrides.
+
+### Behind a reverse proxy
+
+If HTTPS ends at a proxy in front of Grav (e.g. Docker with Traefik or Caddy,
+nginx in front of Apache, a load balancer), Grav only learns its public address
+from the proxy's `X-Forwarded-*` headers. **Grav 2 ignores these headers by
+default**; Grav 1.7 applies `X-Forwarded-Proto` and `X-Forwarded-Port`. Grav then
+reports itself as `http://…` or with the internal port, and connecting fails with
+"pluginBaseUrl passt nicht zur erwarteten Website-URL". The panel names both
+addresses in that case.
+
+Fix it in `user/config/system.yaml` with one of these:
+
+```yaml
+# A: set the public address explicitly
+custom_base_url: 'https://www.example.com'
+```
+
+```yaml
+# B: apply the proxy's headers — only if the proxy sets and overwrites them,
+# otherwise visitors can forge them
+http_x_forwarded:
+  protocol: true           # X-Forwarded-Proto
+  port: true               # X-Forwarded-Port, if the proxy sends it
+reverse_proxy_setup: true  # only for an internal port such as :8080 without X-Forwarded-Port
+```
+
+Then connect again.
 
 ---
 

@@ -29,9 +29,16 @@ if (!class_exists(\Masterminds\HTML5::class)) {
 require_once __DIR__ . '/lib/CssSelectorToXPath.php';
 require_once __DIR__ . '/lib/ServerHtmlMutator.php';
 
+// Reads a reverse proxy's X-Forwarded-* headers for the pairing hint in
+// explainBaseUrlMismatch(); diagnosis only, never used to build a URL we send.
+require_once __DIR__ . '/lib/ForwardedBaseUrl.php';
+
+// 1.0.4: whether a verified sync payload may become the cache (not stale, this site).
+require_once __DIR__ . '/lib/SignedCacheGuard.php';
+
 class SiteCheckAccessibilityPlugin extends Plugin
 {
-    private const PLUGIN_VERSION = '1.0.1';
+    private const PLUGIN_VERSION = '1.0.4';
     // Block-level tags that receive a data-sw-block-id marker for
     // block-scoped structural fixes.
     private const STABLE_BLOCK_TAGS = ['p', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'td', 'figcaption', 'blockquote', 'dt', 'dd'];
@@ -94,7 +101,67 @@ class SiteCheckAccessibilityPlugin extends Plugin
             'onOutputGenerated' => [['onOutputGenerated', 0]],
             'onAdminTwigTemplatePaths' => [['onAdminTwigTemplatePaths', 0]],
             'onTwigInitialized' => [['onTwigInitialized', 0]],
+            // Grav 2 only — fired by the api plugin, never on 1.7. See the handler.
+            'onApiBlueprintResolved' => [['onApiBlueprintResolved', 0]],
         ];
+    }
+
+    /**
+     * Feed the connect-panel state to the Grav 2 admin (admin2).
+     *
+     * admin2 never fires onAdminTwigTemplatePaths, so the Twig field template
+     * that carries the panel on Grav 1.7 does not exist there. Instead admin2
+     * renders the `connectpanel` type from the web component in
+     * admin-next/fields/connectpanel.js and hands it the serialized blueprint
+     * field — which is what this event lets us extend. Same panel, same kit,
+     * different delivery; the Twig path stays untouched for 1.7.
+     *
+     * Authorization: the api plugin's BlueprintController has already enforced
+     * `api.config.read` on this route, including the API-key scope cap. That cap
+     * lives on the PSR-7 request, which the event does not carry — so a second
+     * permission check here could only be a weaker one that a scoped key would
+     * pass (the GHSA-jqgq-v53x-x99g pattern). The route gate is the real gate,
+     * and it matches the Grav 1.7 bar: whoever may read the plugin config.
+     *
+     * @param \RocketTheme\Toolbox\Event\Event $event
+     */
+    public function onApiBlueprintResolved($event): void
+    {
+        if (($event['context'] ?? null) !== 'plugin' || ($event['plugin'] ?? null) !== $this->name) {
+            return;
+        }
+
+        $event['fields'] = $this->injectConnectPanelState(
+            (array) ($event['fields'] ?? []),
+            $this->buildConnectPanelState()
+        );
+    }
+
+    /**
+     * Walk the serialized field tree and attach the panel state to every
+     * `connectpanel` field. Keyed on the field type rather than its name so a
+     * blueprint rename cannot silently strand the panel.
+     *
+     * @param array<int, array<string, mixed>> $fields
+     * @param array<string, mixed> $state
+     * @return array<int, array<string, mixed>>
+     */
+    private function injectConnectPanelState(array $fields, array $state): array
+    {
+        foreach ($fields as &$field) {
+            if (!is_array($field)) {
+                continue;
+            }
+            if (($field['type'] ?? null) === 'connectpanel') {
+                $field['scConnect'] = $state;
+            }
+            if (isset($field['fields']) && is_array($field['fields'])) {
+                $field['fields'] = $this->injectConnectPanelState($field['fields'], $state);
+            }
+        }
+        unset($field);
+
+        return $fields;
     }
 
     /**
@@ -201,7 +268,11 @@ class SiteCheckAccessibilityPlugin extends Plugin
         }
 
         if ($path === '/plugin/sw-acc-connector/page-inventory' && $method === 'GET') {
-            $this->handlePageInventoryEndpoint();
+            // Grav's PagesProcessor calls Pages::init() after onPluginsInitialized,
+            // and Pages::all() throws until then — on 1.7 and 2.x alike. Answer
+            // from onPagesInitialized instead; see onPagesInitializedPageInventory().
+            $this->enable(['onPagesInitialized' => ['onPagesInitializedPageInventory', 1000]]);
+            return true;
         }
 
         if ($path === '/plugin/sw-acc-connector/webapp-status' && $method === 'GET') {
@@ -424,6 +495,12 @@ class SiteCheckAccessibilityPlugin extends Plugin
      * fragments and non-routable pages (error pages etc.) never inflate the
      * billing-relevant page count. `urls` is capped (the webapp aborts above
      * 250 anyway); `publishedCount` is always the true total.
+     *
+     * Served from onPagesInitialized, not from onPluginsInitialized like the
+     * other endpoints: Pages::all() needs Pages::init(), which Grav's
+     * PagesProcessor only runs after the plugins are initialised. Called any
+     * earlier, Pages::root() throws "Internal error" and the webapp silently
+     * falls back to sitemap/crawl enumeration.
      */
     private function handlePageInventoryEndpoint(): void
     {
@@ -478,6 +555,31 @@ class SiteCheckAccessibilityPlugin extends Plugin
                 'truncated' => $publishedCount > count($urls),
             ],
         ]);
+    }
+
+    /**
+     * Deferred /page-inventory handler, registered by maybeHandlePluginEndpoint()
+     * only for that request. Priority 1000 answers before content-level
+     * onPagesInitialized handlers of other plugins (redirects, maintenance
+     * pages); admin and admin2 use 1000 too, but only for /admin routes.
+     *
+     * Keeps the JSON error contract of onPluginsInitialized(), so the webapp
+     * never receives Grav's HTML error page from this endpoint.
+     */
+    public function onPagesInitializedPageInventory(): void
+    {
+        try {
+            $this->handlePageInventoryEndpoint();
+        } catch (\Throwable $e) {
+            $this->grav['log']->error('[site-check] Plugin Error: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            $this->sendJson([
+                'success' => false,
+                'error' => 'Internal error',
+            ], 500);
+        }
     }
 
 
@@ -1259,17 +1361,23 @@ class SiteCheckAccessibilityPlugin extends Plugin
             $exchangeErrorMessage = (string) (($exchangeBody['error']['message'] ?? '') ?: ($exchangeBody['error'] ?? ''));
 
             if (!$exchangeSuccess) {
+                $exchangeError = $this->explainBaseUrlMismatch(
+                    $exchangeErrorMessage !== '' ? $exchangeErrorMessage : 'Pairing-Austausch fehlgeschlagen',
+                    (int) ($exchangeResponse['status'] ?? 0),
+                    $pluginBaseUrl
+                );
+
                 $this->writeConnectionState([
                     'status' => self::CONNECT_STATE_ERROR,
                     'pairingCode' => $pairingCode,
                     'pluginBaseUrl' => $pluginBaseUrl,
                     'lastPairingAttemptAt' => gmdate('c'),
-                    'lastError' => $exchangeErrorMessage !== '' ? $exchangeErrorMessage : 'Pairing-Austausch fehlgeschlagen',
+                    'lastError' => $exchangeError,
                 ]);
 
                 $this->sendJson([
                     'success' => false,
-                    'error' => $exchangeErrorMessage !== '' ? $exchangeErrorMessage : 'Pairing-Austausch fehlgeschlagen',
+                    'error' => $exchangeError,
                 ], $exchangeResponse['status'] ?? 502);
             }
 
@@ -1370,6 +1478,37 @@ class SiteCheckAccessibilityPlugin extends Plugin
                 'error' => 'Verbindung konnte nicht hergestellt werden: ' . $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * The web app compares pluginBaseUrl (Grav's own root URL) with the website
+     * URL by origin and only says that they differ. Name the URL Grav reports,
+     * and behind a proxy whose X-Forwarded-* headers Grav does not apply (the
+     * Grav 2 default) also the public URL and how to make Grav use it. The proxy
+     * part is added to any failed exchange, since the next attempt would run into
+     * the mismatch anyway.
+     */
+    private function explainBaseUrlMismatch(string $message, int $status, string $pluginBaseUrl): string
+    {
+        $forwardedBaseUrl = \Grav\Plugin\SiteCheckAccessibility\ForwardedBaseUrl::differingFrom($_SERVER, $pluginBaseUrl);
+        if ($forwardedBaseUrl !== null) {
+            return $message
+                . ' Grav meldet diese Website als ' . $pluginBaseUrl . ', über den Proxy ist sie aber als '
+                . $forwardedBaseUrl . ' erreichbar. Grav übernimmt die Angaben des Proxys nicht vollständig'
+                . ' (system.http_x_forwarded, seit Grav 2 standardmäßig aus).'
+                . " Abhilfe in user/config/system.yaml: custom_base_url: '" . $forwardedBaseUrl . "' setzen"
+                . ' oder die passenden Schalter unter http_x_forwarded aktivieren (siehe README des Plugins).';
+        }
+
+        // The web app sends no error code for the mismatch, but it is the only
+        // 409 of the pairing exchange that names pluginBaseUrl.
+        if ($status === 409 && stripos($message, 'pluginBaseUrl') !== false) {
+            return $message
+                . ' Grav meldet diese Website als ' . $pluginBaseUrl . '. Schema, Host und Port müssen mit der'
+                . ' in der Webapp angelegten Website-Adresse übereinstimmen (z. B. mit oder ohne www).';
+        }
+
+        return $message;
     }
 
     private function handleDisconnectEndpoint(): void
@@ -1793,7 +1932,16 @@ class SiteCheckAccessibilityPlugin extends Plugin
         // a hiccupy infrastructure never regresses a valid apply.
         if ($scope === 'occurrence') {
             $targetMatches = null;
-            if ($imageKey !== '') {
+            // 1.0.4 (A1b): with an image key the delivery writes alt only at nodes of
+            // the selector whose src matches it. The check used to ask only whether
+            // SOME <img> carries that src: for an <area> it found the map image,
+            // reported success, and the area stayed unchanged (test lab 1.1.1,
+            // GRENZ-08). It now asks what the delivery will do; when the selector is
+            // beyond the minimal converter it falls back to the old image search.
+            if ($imageKey !== '' && $normalizedSelector !== '') {
+                $targetMatches = $this->preflightSelectorCarriesImage($pageUrl, $normalizedSelector, $imageKey);
+            }
+            if ($targetMatches === null && $imageKey !== '') {
                 $targetMatches = $this->preflightAltTargetExists($pageUrl, $imageKey);
             }
             if ($targetMatches === null && $normalizedSelector !== '') {
@@ -4156,6 +4304,54 @@ class SiteCheckAccessibilityPlugin extends Plugin
     }
 
     /**
+     * 1.0.4 (A1b): does a node of the selector carry the image key as its src,
+     * as the delivery's matchesImageKey guard requires? true / false like
+     * preflightSelectorExists, null when the selector is beyond the minimal
+     * converter or the page could not be read.
+     */
+    private function preflightSelectorCarriesImage(string $pageUrl, string $selector, string $imageKey): ?bool
+    {
+        $xpath = $this->cssSelectorToXPath($selector);
+        if ($xpath === null) {
+            return null;
+        }
+        $html = $this->fetchHtmlForPreflight($pageUrl);
+        if (!is_string($html) || $html === '' || !class_exists(\DOMDocument::class) || !class_exists(\DOMXPath::class)) {
+            return null;
+        }
+
+        libxml_use_internal_errors(true);
+        $dom = new \DOMDocument('1.0', 'UTF-8');
+        $loaded = $dom->loadHTML(
+            mb_convert_encoding($html, 'HTML-ENTITIES', 'UTF-8'),
+            LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD
+        );
+        libxml_clear_errors();
+        if ($loaded === false) {
+            return null;
+        }
+
+        try {
+            $nodes = @(new \DOMXPath($dom))->query($xpath);
+            if ($nodes === false) {
+                return null;
+            }
+            foreach ($nodes as $node) {
+                if (!$node instanceof \DOMElement) {
+                    continue;
+                }
+                $src = trim((string) $node->getAttribute('src'));
+                if ($src !== '' && $this->normalizeImageKey($this->resolveUrlAgainstPage($src, $pageUrl)) === $imageKey) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
      * Best-effort check whether the given CSS selector matches at least
      * one element on the rendered page. Uses a minimal CSS→XPath converter
      * that handles the selector shapes the scanner produces in practice
@@ -4702,26 +4898,51 @@ class SiteCheckAccessibilityPlugin extends Plugin
             return null;
         }
 
+        // 1.0.4: a cache signed for another website is never delivered (written
+        // before this check, or after a re-pairing with another website).
+        $connectedWebsiteId = trim((string) ($this->readConnectionState()['websiteId'] ?? ''));
+        $signedWebsiteId = trim((string) ($payload['websiteId'] ?? ''));
+        if ($connectedWebsiteId !== '' && $signedWebsiteId !== $connectedWebsiteId) {
+            return null;
+        }
+
         return $payload;
     }
 
-    private function storeSignedCache(array $envelope, string $version, string $issuedAt): bool
+    /**
+     * Store a verified envelope as the cache. Returns null when stored, else why not:
+     * a SignedCacheGuard reason (older than the stored state, another website) or
+     * 'write_failed'. 1.0.4: lastIssuedAt comes from the signed payload; before, the
+     * unsigned issuedAt of the request body was stored, so a replayed older envelope
+     * reset it and the reader accepted the old state (test lab 1.1.1, K10, S1/S2).
+     */
+    private function storeSignedCache(array $envelope, string $version, array $payload): ?string
     {
+        $reason = \Grav\Plugin\SiteCheckAccessibility\SignedCacheGuard::rejectReason(
+            $payload,
+            $this->readSignedCacheState()['lastIssuedAt'] ?? null,
+            $this->readConnectionState()['websiteId'] ?? null
+        );
+        if ($reason !== null) {
+            return $reason;
+        }
+        $issuedAt = \Grav\Plugin\SiteCheckAccessibility\SignedCacheGuard::signedIssuedAt($payload);
+
         $path = $this->getSignedCacheFilePath();
         $dir = dirname($path);
         if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
-            return false;
+            return 'write_failed';
         }
         $json = json_encode($envelope, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        if (!is_string($json)) return false;
-        if (file_put_contents($path, $json) === false) return false;
+        if (!is_string($json)) return 'write_failed';
+        if (file_put_contents($path, $json) === false) return 'write_failed';
 
         $this->writeSignedCacheState([
             'lastVersion' => $version,
             'lastIssuedAt' => $issuedAt,
             'lastSuccessfulFetchAt' => gmdate('c'),
         ]);
-        return true;
+        return null;
     }
 
     private function readSignedCacheState(): array
@@ -4855,8 +5076,13 @@ class SiteCheckAccessibilityPlugin extends Plugin
         $signatureB64 = (string) ($envelope['signature'] ?? '');
         if (!is_string($payloadBytes) || $signatureB64 === '') return;
         if (!$this->verifyEnvelopeSignature($payloadBytes, $signatureB64)) return;
+        $pulledPayload = json_decode($payloadBytes, true);
+        if (!is_array($pulledPayload)) return;
 
-        $this->storeSignedCache($envelope, $version, $issuedAt);
+        $reason = $this->storeSignedCache($envelope, $version, $pulledPayload);
+        if ($reason !== null) {
+            $this->pluginApplyDebug('SYNC-PULL-REJECTED', ['reason' => $reason, 'issuedAt' => $issuedAt]);
+        }
     }
 
     /**
@@ -4965,12 +5191,31 @@ class SiteCheckAccessibilityPlugin extends Plugin
             'overrideTypes' => $overrideTypes,
         ]);
 
-        if (!$this->storeSignedCache($envelope, $version, $issuedAt)) {
-            $this->pluginApplyDebug('SYNC-PUSH-REJECTED', ['reason' => 'cache_write_failed']);
+        if (!is_array($payloadDecoded)) {
+            $this->pluginApplyDebug('SYNC-PUSH-REJECTED', ['reason' => 'payload_invalid']);
             $this->sendJson([
                 'success' => false,
-                'error' => 'Cache konnte nicht geschrieben werden',
-            ], 500);
+                'error' => 'payload ist kein JSON-Objekt',
+            ], 400);
+        }
+
+        $storeRejection = $this->storeSignedCache($envelope, $version, $payloadDecoded);
+        if ($storeRejection !== null) {
+            $this->pluginApplyDebug('SYNC-PUSH-REJECTED', ['reason' => $storeRejection, 'issuedAt' => $issuedAt]);
+            // 1.0.4: an older state or another website's envelope is a conflict, not a
+            // server error: the signature was fine, the content does not fit here.
+            $errors = [
+                \Grav\Plugin\SiteCheckAccessibility\SignedCacheGuard::REASON_STALE => ['Älterer Stand als der gespeicherte, nicht übernommen', 409],
+                \Grav\Plugin\SiteCheckAccessibility\SignedCacheGuard::REASON_WEBSITE_MISMATCH => ['Umschlag gehört zu einer anderen Website', 409],
+                \Grav\Plugin\SiteCheckAccessibility\SignedCacheGuard::REASON_WEBSITE_MISSING => ['Umschlag nennt keine Website', 400],
+                \Grav\Plugin\SiteCheckAccessibility\SignedCacheGuard::REASON_ISSUED_AT_MISSING => ['Umschlag nennt keinen Ausstellungszeitpunkt', 400],
+            ];
+            [$error, $status] = $errors[$storeRejection] ?? ['Cache konnte nicht geschrieben werden', 500];
+            $this->sendJson([
+                'success' => false,
+                'error' => $error,
+                'reason' => $storeRejection,
+            ], $status);
         }
 
         $this->pluginApplyDebug('SYNC-PUSH-STORED', [
@@ -5610,16 +5855,46 @@ class SiteCheckAccessibilityPlugin extends Plugin
         }
     }
 
+    /**
+     * Twig entry point for the Grav 1.7 field template. Adds the inlined kit,
+     * which only that adapter needs: the Grav 2 web component carries its own
+     * copy, so shipping ~28 KB of CSS/JS through the blueprint API would be dead
+     * weight on every config load.
+     */
     public function buildAdminConnectPanelState(): array
     {
         // Only ever expose the admin action secret + connection metadata (and run
         // the outbound reconcile) inside the authenticated admin. This method is a
         // globally registered Twig function; if a frontend template were to call
         // it, an empty state keeps the secret out of public HTML.
+        //
+        // Note this guard is Grav-1.7-shaped: isAdmin() is `isset($grav['admin'])`,
+        // which only the classic admin plugin sets. On Grav 2 the panel state
+        // travels through onApiBlueprintResolved(), gated by the API route instead.
         if (!$this->isAdmin()) {
             return [];
         }
 
+        return array_merge($this->buildConnectPanelState(), [
+            // Shared connector-UI kit (single source: .plugin/_shared/connector-ui/).
+            // Injected inline so the admin panel stays self-contained (no extra asset request).
+            'kitCss' => (string) @file_get_contents(__DIR__ . '/admin/themes/grav/templates/forms/fields/connectpanel/sc-connector.css'),
+            'kitJs' => (string) @file_get_contents(__DIR__ . '/admin/themes/grav/templates/forms/fields/connectpanel/sc-connector.js'),
+        ]);
+    }
+
+    /**
+     * Connection state + endpoints the pairing panel needs, independent of how it
+     * gets delivered (Twig template on Grav 1.7, web component on Grav 2).
+     *
+     * Carries the admin action secret, so every caller must authorize first —
+     * buildAdminConnectPanelState() via isAdmin(), onApiBlueprintResolved() via
+     * the api plugin's route permission.
+     *
+     * @return array<string, mixed>
+     */
+    private function buildConnectPanelState(): array
+    {
         // Ask the webapp for the authoritative status before rendering the
         // admin panel, so a hard refresh already shows the truth instead of a
         // stale local "connected" state. Errors are tolerated — the JS-level
@@ -5652,10 +5927,6 @@ class SiteCheckAccessibilityPlugin extends Plugin
             // the authenticated admin; the panel JS returns it in X-Sc-Acc-Nonce.
             'csrfToken' => $this->getAdminActionSecret(),
             'csrfHeader' => 'X-Sc-Acc-Nonce',
-            // Shared connector-UI kit (single source: .plugin/_shared/connector-ui/).
-            // Injected inline so the admin panel stays self-contained (no extra asset request).
-            'kitCss' => (string) @file_get_contents(__DIR__ . '/admin/themes/grav/templates/forms/fields/connectpanel/sc-connector.css'),
-            'kitJs' => (string) @file_get_contents(__DIR__ . '/admin/themes/grav/templates/forms/fields/connectpanel/sc-connector.js'),
         ];
     }
 

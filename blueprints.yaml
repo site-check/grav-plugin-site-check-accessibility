@@ -1,7 +1,7 @@
 name: Site-Check Accessibility
 slug: site-check-accessibility
 type: plugin
-version: 1.0.1
+version: 1.0.4
 description: "Verbindet eine Grav-Website mit der Site-Check Accessibility-Webapp und schreibt geprüfte Barrierefreiheits-Fixes serverseitig in die ausgelieferte Seite. Inkl. optionalem Assistenz-Overlay."
 icon: universal-access
 author:
@@ -17,10 +17,16 @@ dependencies:
   - { name: grav, version: '>=1.7.0' }
   - { name: php, version: '>=8.0' }
 
-# Grav major lines this release has been tested against. Without this block GPM
-# infers "1.7 only" from the dependency constraint above and hides the plugin
-# from Grav 2.0 installs. The dependency stays at >=1.7.0 (minimum API gate);
-# compatibility declares the tested majors.
+# Grav major lines this release supports. GPM hides a plugin from installs
+# outside this list and compares only the major version, so '2.0' covers every
+# Grav 2.x. migrate-grav (the official 1.7 -> 2 migration) looks for the literal
+# '2.0' and disables plugins without it — keep exactly '2.0'. The dependency
+# above stays at >=1.7.0 (minimum API gate).
+#
+# The pairing panel ships twice: a Twig field for the classic admin (1.7) and a
+# web component under admin-next/fields/ for Grav 2's admin2, which never fires
+# onAdminTwigTemplatePaths. Tested against Grav 1.7.49.5 and 2.2.2 (admin2
+# 2.1.25, api 1.0.42).
 compatibility:
   grav:
     - '1.7'

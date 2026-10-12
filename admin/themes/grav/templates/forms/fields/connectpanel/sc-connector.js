@@ -6,10 +6,19 @@
    disconnect / status-poll / overlay-toggle via fetch (live-async). When an
    endpoint is absent the matching <form> keeps its native server POST as a
    no-JS fallback.
+
+   Two boot paths:
+   - Light DOM (Grav 1.7 Twig, WordPress, TYPO3, Joomla): the adapter renders the
+     panel into the page and the kit picks it up itself on load.
+   - Shadow DOM (the Grav 2 admin2 web component): a shadow root is invisible to
+     document.querySelectorAll, so that host calls ScConnector.initPanel(root)
+     with its own panel element once the markup is attached.
    ========================================================================= */
-(function () {
+(function (global) {
   var panels = document.querySelectorAll('[data-sc-panel]');
   for (var i = 0; i < panels.length; i++) { initPanel(panels[i]); }
+
+  global.ScConnector = { initPanel: initPanel };
 
   function initPanel(panel) {
     if (!panel || panel.dataset.scInit === '1') { return; }
@@ -325,4 +334,4 @@
     loadStatus(false);
     loadWebappStatus();
   }
-})();
+})(typeof globalThis !== 'undefined' ? globalThis : window);
