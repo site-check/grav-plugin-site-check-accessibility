@@ -69,11 +69,6 @@
 @keyframes scc-pulse{0%{transform:translate(-50%,-50%) scale(1);opacity:.28}70%{transform:translate(-50%,-50%) scale(2.7);opacity:0}100%{transform:translate(-50%,-50%) scale(2.7);opacity:0}}
 
 /* Account hint — subtle text line inside hero, disconnected only */
-.scc-newhint{margin:16px 0 0;font-size:var(--scc-fs-sm);line-height:var(--scc-lh-body);font-weight:var(--scc-fw-reg);color:var(--scc-muted);max-width:600px}
-.scc-newhint strong{font-weight:var(--scc-fw-med);color:var(--scc-ink-2)}
-.scc-newhint a{color:var(--scc-accent-ink);font-weight:var(--scc-fw-med);text-decoration:none;border-bottom:1px solid var(--scc-accent-tint-bd);white-space:nowrap}
-.scc-newhint a:hover{border-bottom-color:var(--scc-accent)}
-.scc[data-state="connected"] .scc-newhint,.scc[data-state="interrupted"] .scc-newhint{display:none}
 
 /* Manage — inside hero, connected/interrupted only */
 .scc-hero__manage{display:none;gap:10px;margin-top:20px;flex-wrap:wrap}
@@ -88,18 +83,13 @@
 .scc-card__c{margin:0;font-size:var(--scc-fs-base);line-height:var(--scc-lh-body);font-weight:var(--scc-fw-reg);color:var(--scc-muted);max-width:60ch}
 
 .scc-label{display:block;margin:18px 0 7px;font-size:var(--scc-fs-label);font-weight:var(--scc-fw-med);letter-spacing:.01em;color:var(--scc-ink-2)}
-.scc-input{width:100%;border:1px solid var(--scc-border-strong);border-radius:var(--scc-r-ctrl);padding:13px 14px;font-size:var(--scc-fs-base);font-family:inherit;background:var(--scc-surface);color:var(--scc-ink);box-shadow:inset 0 1px 2px rgba(20,30,10,.03)}
-.scc-input:focus{outline:none;border-color:var(--scc-accent);box-shadow:0 0 0 4px rgba(109,150,29,.15)}
-.scc-input[data-valid="true"]{border-color:var(--scc-accent);box-shadow:0 0 0 3px rgba(109,150,29,.14)}
-.scc-input[data-valid="false"]{border-color:var(--scc-err-dot);box-shadow:0 0 0 3px rgba(209,59,59,.12)}
-.scc-fb{min-height:16px;margin-top:6px;font-size:var(--scc-fs-xs);line-height:var(--scc-lh-snug);color:var(--scc-faint)}
-.scc-fb[data-tone="valid"]{color:var(--scc-accent-ink)}
-.scc-fb[data-tone="invalid"]{color:var(--scc-err-tx)}
-/* Verbindungscode-Zeile: Eingabe + grüner CTA nebeneinander */
-.scc-connect-row{display:flex;gap:10px;align-items:stretch}
-.scc-connect-row .scc-input{flex:1 1 auto}
-.scc-btn--connect{flex:0 0 auto;margin:0;padding:13px 24px;font-size:var(--scc-fs-base)}
-@media (max-width:560px){.scc-connect-row{flex-direction:column}.scc-btn--connect{width:100%}}
+/* Verbinden (v2): ein Satz, ein Knopf; der Code reist ueber site-check.de */
+.scc-btn--connect{flex:0 0 auto;margin:16px 0 0;padding:13px 24px;font-size:var(--scc-fs-base)}
+/* Verbunden-Karte: nur im Zustand connected */
+.scc-done{display:none;margin-top:var(--scc-gap)}
+.scc[data-state="connected"] .scc-done{display:block}
+.scc-done .scc-btn{display:inline-flex;margin-top:16px;text-decoration:none}
+@media (max-width:560px){.scc-btn--connect,.scc-done .scc-btn{width:100%;justify-content:center}}
 
 .scc-btn{appearance:none;border:none;border-radius:var(--scc-r-ctrl);padding:13px 18px;font:inherit;font-size:var(--scc-fs-base);font-weight:var(--scc-fw-bold);cursor:pointer;transition:transform .12s ease,box-shadow .12s ease,background .12s ease}
 .scc-btn:hover{transform:translateY(-1px)}

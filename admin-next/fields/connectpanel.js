@@ -35,20 +35,29 @@ const TAG = window.__GRAV_FIELD_TAG;
    .plugin/_shared/connector-ui/sc-connector.{css,js}. Inlining keeps the panel
    self-contained: admin2 already fetched this file, and plugin admin assets
    have no public URL to load them from at runtime. */
-const KIT_CSS = "/* =========================================================================\n   Site-Check Accessibility — Connector Admin Panel (CSS)\n   Light-only, three states (connected / interrupted / disconnected).\n   Tokens are scoped to .scc (NOT :root) so they never clash with the host\n   CMS admin theme.\n   ========================================================================= */\n\n.scc{\n  /* Colors */\n  --scc-ink:#141613; --scc-ink-2:#39402f; --scc-muted:#5c6553; --scc-faint:#8b937d;\n  --scc-surface:#ffffff; --scc-surface-2:#f6f8f0;\n  --scc-border:#e4e8db; --scc-border-strong:#d6ddc7;\n  --scc-accent:#6d961d; --scc-accent-ink:#41600f; --scc-accent-tint:#eef4e0; --scc-accent-tint-bd:#d9e6bb;\n  --scc-warn-bg:#fbf4e2; --scc-warn-bd:#eed58a; --scc-warn-tx:#7a5900; --scc-warn-dot:#c58a00;\n  --scc-err-bg:#fbeeee; --scc-err-bd:#f0c2c2; --scc-err-tx:#9f1f1f; --scc-err-dot:#d13b3b;\n  --scc-neutral:#9aa389;\n  /* Typo-Skala */\n  --scc-fs-lead:15px; --scc-fs-base:14px; --scc-fs-sm:13px; --scc-fs-xs:12px; --scc-fs-label:12px;\n  /* Zeilenhöhen */\n  --scc-lh-snug:1.45; --scc-lh-body:1.62;\n  /* Gewichte */\n  --scc-fw-bold:800; --scc-fw-med:700; --scc-fw-reg:400;\n  /* Rhythmus & Form */\n  --scc-gap:14px; --scc-pad-card:24px 26px; --scc-pad-bar:14px 20px;\n  --scc-r-lg:20px; --scc-r-hero:22px; --scc-r-bar:14px; --scc-r-ctrl:12px;\n  --scc-shadow-hero:0 16px 40px rgba(24,34,10,.08); --scc-shadow-card:0 8px 24px rgba(24,34,10,.05);\n  --scc-font:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif;\n\n  max-width:820px;margin:6px 0 22px;color:var(--scc-ink);font-family:var(--scc-font);line-height:1.6\n}\n.scc *{box-sizing:border-box}\n\n/* Typo-Hierarchie — ausschließlich h1/h2/h3 verwenden, sonst nur <strong> zur Betonung */\n.scc-h1{margin:0;font-size:24px;line-height:1.18;font-weight:800;letter-spacing:-.012em;color:var(--scc-ink)}\n.scc-h2{margin:0;font-size:17px;line-height:1.28;font-weight:800;letter-spacing:-.006em;color:var(--scc-ink)}\n.scc-h3{margin:0;font-size:14px;line-height:1.3;font-weight:700;color:var(--scc-ink)}\n.scc strong,.scc b{font-weight:700}\n\n/* Brand bar */\n.scc-brandbar{display:flex;align-items:center;gap:16px;padding:var(--scc-pad-bar);background:var(--scc-surface);border:1px solid var(--scc-border);border-radius:var(--scc-r-bar);box-shadow:var(--scc-shadow-card);margin-bottom:var(--scc-gap)}\n.scc-brandbar__logo{height:26px;width:auto;display:block}\n.scc-brandbar__sep{width:1px;height:24px;background:var(--scc-border-strong)}\n.scc-brandbar__name{font-size:var(--scc-fs-base);font-weight:var(--scc-fw-med);letter-spacing:-.01em;color:var(--scc-ink)}\n.scc-brandbar__ver{color:var(--scc-muted);font-weight:var(--scc-fw-reg)}\n.scc-brandbar__spacer{flex:1}\n.scc-brandbar__help{font-size:var(--scc-fs-sm);font-weight:var(--scc-fw-med);color:var(--scc-muted);text-decoration:none;border-bottom:1px dotted var(--scc-border-strong)}\n.scc-brandbar__help:hover{color:var(--scc-accent-ink);border-bottom-color:var(--scc-accent)}\n\n/* Hero */\n.scc-hero{position:relative;overflow:hidden;border:1px solid var(--scc-border);border-radius:var(--scc-r-hero);background:linear-gradient(180deg,#fff 0%,var(--scc-surface-2) 100%);box-shadow:var(--scc-shadow-hero)}\n.scc-hero__in{position:relative;padding:var(--scc-pad-card)}\n.scc-hero__top{display:flex;justify-content:space-between;gap:20px;align-items:flex-start}\n.scc-hero__title{max-width:520px;text-wrap:balance}\n.scc-hero__lead{margin:11px 0 0;max-width:600px;font-size:var(--scc-fs-lead);line-height:var(--scc-lh-body);font-weight:var(--scc-fw-reg);color:var(--scc-muted)}\n\n/* Status signal lamp (text left, lamp right, centered in a soft halo, pulsing) */\n.scc-signal{position:relative;display:inline-flex;align-items:center;gap:12px;flex:0 0 auto;padding-top:2px}\n.scc-signal[data-tone=\"neutral\"]{--lamp:var(--scc-neutral)}\n.scc-signal[data-tone=\"ok\"]{--lamp:var(--scc-accent)}\n.scc-signal[data-tone=\"danger\"]{--lamp:var(--scc-err-dot)}\n.scc-signal__label{font-size:var(--scc-fs-sm);font-weight:var(--scc-fw-med);letter-spacing:.01em;white-space:nowrap;color:var(--scc-ink-2)}\n.scc-signal[data-tone=\"ok\"] .scc-signal__label{color:var(--scc-accent-ink)}\n.scc-signal[data-tone=\"danger\"] .scc-signal__label{color:var(--scc-err-tx)}\n.scc-lampwrap{position:relative;display:inline-block;width:12px;height:12px;flex:0 0 auto}\n.scc-lampwrap>*,.scc-lampwrap::before,.scc-lampwrap::after{position:absolute;top:50%;left:50%;border-radius:50%;transform:translate(-50%,-50%)}\n.scc-lampwrap::before{content:\"\";width:336px;height:336px;background:radial-gradient(circle,color-mix(in srgb,var(--lamp) 22%,transparent) 0%,transparent 70%);pointer-events:none}\n.scc-lampwrap::after{content:\"\";width:12px;height:12px;background:var(--lamp);opacity:.28;animation:scc-pulse 4.2s ease-out infinite;pointer-events:none}\n.scc-lamp{width:12px;height:12px;background:var(--lamp);box-shadow:0 0 6px color-mix(in srgb,var(--lamp) 65%,transparent)}\n@keyframes scc-pulse{0%{transform:translate(-50%,-50%) scale(1);opacity:.28}70%{transform:translate(-50%,-50%) scale(2.7);opacity:0}100%{transform:translate(-50%,-50%) scale(2.7);opacity:0}}\n\n/* Account hint — subtle text line inside hero, disconnected only */\n.scc-newhint{margin:16px 0 0;font-size:var(--scc-fs-sm);line-height:var(--scc-lh-body);font-weight:var(--scc-fw-reg);color:var(--scc-muted);max-width:600px}\n.scc-newhint strong{font-weight:var(--scc-fw-med);color:var(--scc-ink-2)}\n.scc-newhint a{color:var(--scc-accent-ink);font-weight:var(--scc-fw-med);text-decoration:none;border-bottom:1px solid var(--scc-accent-tint-bd);white-space:nowrap}\n.scc-newhint a:hover{border-bottom-color:var(--scc-accent)}\n.scc[data-state=\"connected\"] .scc-newhint,.scc[data-state=\"interrupted\"] .scc-newhint{display:none}\n\n/* Manage — inside hero, connected/interrupted only */\n.scc-hero__manage{display:none;gap:10px;margin-top:20px;flex-wrap:wrap}\n.scc[data-state=\"connected\"] .scc-hero__manage,.scc[data-state=\"interrupted\"] .scc-hero__manage{display:flex}\n.scc[data-state=\"interrupted\"] .scc-btn--disconnect{display:none}\n\n/* Connect card */\n.scc-connect{margin-top:var(--scc-gap)}\n.scc[data-state=\"connected\"] .scc-connect{display:none}\n.scc-card{border:1px solid var(--scc-border);border-radius:var(--scc-r-lg);background:var(--scc-surface);box-shadow:var(--scc-shadow-card);padding:var(--scc-pad-card)}\n.scc-card__t{margin:0 0 8px}\n.scc-card__c{margin:0;font-size:var(--scc-fs-base);line-height:var(--scc-lh-body);font-weight:var(--scc-fw-reg);color:var(--scc-muted);max-width:60ch}\n\n.scc-label{display:block;margin:18px 0 7px;font-size:var(--scc-fs-label);font-weight:var(--scc-fw-med);letter-spacing:.01em;color:var(--scc-ink-2)}\n.scc-input{width:100%;border:1px solid var(--scc-border-strong);border-radius:var(--scc-r-ctrl);padding:13px 14px;font-size:var(--scc-fs-base);font-family:inherit;background:var(--scc-surface);color:var(--scc-ink);box-shadow:inset 0 1px 2px rgba(20,30,10,.03)}\n.scc-input:focus{outline:none;border-color:var(--scc-accent);box-shadow:0 0 0 4px rgba(109,150,29,.15)}\n.scc-input[data-valid=\"true\"]{border-color:var(--scc-accent);box-shadow:0 0 0 3px rgba(109,150,29,.14)}\n.scc-input[data-valid=\"false\"]{border-color:var(--scc-err-dot);box-shadow:0 0 0 3px rgba(209,59,59,.12)}\n.scc-fb{min-height:16px;margin-top:6px;font-size:var(--scc-fs-xs);line-height:var(--scc-lh-snug);color:var(--scc-faint)}\n.scc-fb[data-tone=\"valid\"]{color:var(--scc-accent-ink)}\n.scc-fb[data-tone=\"invalid\"]{color:var(--scc-err-tx)}\n/* Verbindungscode-Zeile: Eingabe + grüner CTA nebeneinander */\n.scc-connect-row{display:flex;gap:10px;align-items:stretch}\n.scc-connect-row .scc-input{flex:1 1 auto}\n.scc-btn--connect{flex:0 0 auto;margin:0;padding:13px 24px;font-size:var(--scc-fs-base)}\n@media (max-width:560px){.scc-connect-row{flex-direction:column}.scc-btn--connect{width:100%}}\n\n.scc-btn{appearance:none;border:none;border-radius:var(--scc-r-ctrl);padding:13px 18px;font:inherit;font-size:var(--scc-fs-base);font-weight:var(--scc-fw-bold);cursor:pointer;transition:transform .12s ease,box-shadow .12s ease,background .12s ease}\n.scc-btn:hover{transform:translateY(-1px)}\n.scc-btn:disabled{opacity:.55;cursor:not-allowed;transform:none}\n.scc-btn:focus-visible{outline:3px solid rgba(109,150,29,.5);outline-offset:2px}\n.scc-btn--sm{padding:8px 14px;font-size:var(--scc-fs-sm);border-radius:10px}\n/* Status aktualisieren: dezent, aber Rand mit >=3:1 Kontrast zum Hintergrund (WCAG 1.4.11) */\n.scc-btn--secondary{background:#fff;color:var(--scc-ink-2);border:1px solid #8a9078;box-shadow:0 1px 2px rgba(20,30,10,.08)}\n.scc-btn--secondary:hover{border-color:#6f7660;background:#fbfcf8}\n/* Verbindung trennen: ganz dezentes Hellrot */\n.scc-btn--danger{background:var(--scc-err-bg);color:var(--scc-err-tx);border:1px solid var(--scc-err-bd)}\n.scc-btn--danger:hover{background:#f7e2e2;border-color:#e6b0b0}\n/* Jetzt verbinden: der EINE farbige CTA */\n.scc-btn--accent{background:linear-gradient(120deg,rgb(98,129,0) 0%,rgb(30,90,60) 50%,rgb(0,3,128) 100%);color:#fff;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;box-shadow:0 8px 18px rgba(20,50,80,.26)}\n.scc-btn--accent:hover{filter:brightness(1.08)}\n.scc-spinner{display:inline-block;width:13px;height:13px;border-radius:50%;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;vertical-align:-2px;margin-right:8px;animation:scc-spin 1s linear infinite}\n@keyframes scc-spin{to{transform:rotate(360deg)}}\n\n/* Status-/Aktionsbanner */\n.scc-note{display:none;align-items:flex-start;gap:11px;border-radius:14px;padding:13px 15px;margin-top:14px;font-size:var(--scc-fs-sm);line-height:var(--scc-lh-body)}\n.scc-note.is-on{display:flex}\n.scc-note:before{content:\"\";width:9px;height:9px;border-radius:50%;margin-top:6px;flex:0 0 auto}\n.scc-note--ok{background:var(--scc-accent-tint);color:var(--scc-accent-ink);border:1px solid var(--scc-accent-tint-bd)}.scc-note--ok:before{background:var(--scc-accent)}\n.scc-note--warn{background:var(--scc-warn-bg);color:var(--scc-warn-tx);border:1px solid var(--scc-warn-bd)}.scc-note--warn:before{background:var(--scc-warn-dot)}\n.scc-note--err{background:var(--scc-err-bg);color:var(--scc-err-tx);border:1px solid var(--scc-err-bd)}.scc-note--err:before{background:var(--scc-err-dot)}\n.scc-note--info{background:var(--scc-surface-2);color:var(--scc-ink-2);border:1px solid var(--scc-border-strong)}.scc-note--info:before{background:var(--scc-neutral)}\n\n/* Settings */\n.scc-settings{margin-top:var(--scc-gap);border:1px solid var(--scc-border);border-radius:var(--scc-r-lg);background:var(--scc-surface);box-shadow:var(--scc-shadow-card);padding:var(--scc-pad-card)}\n.scc-settings__t{margin:0 0 4px}\n.scc-settings__c{margin:0 0 12px;font-size:var(--scc-fs-sm);line-height:var(--scc-lh-body);color:var(--scc-muted)}\n.scc-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 0;border-top:1px solid var(--scc-border)}\n.scc-row:first-of-type{border-top:none}\n.scc-row__t{margin:0}\n.scc-row__x{font-size:var(--scc-fs-xs);line-height:var(--scc-lh-snug);color:var(--scc-muted);margin-top:3px}\n.scc-toggle{position:relative;width:46px;height:26px;border-radius:999px;border:none;background:#c9d0bd;cursor:pointer;flex:0 0 auto;transition:background .15s ease}\n.scc-toggle:before{content:\"\";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .15s ease}\n.scc-toggle[aria-pressed=\"true\"]{background:var(--scc-accent)}\n.scc-toggle[aria-pressed=\"true\"]:before{transform:translateX(20px)}\n.scc-toggle:disabled{opacity:.55;cursor:not-allowed}\n.scc-toggle:focus-visible{outline:3px solid rgba(109,150,29,.5);outline-offset:2px}\n\n/* Footer */\n.scc-foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-top:var(--scc-gap);padding:var(--scc-pad-bar);border:1px solid var(--scc-border);border-radius:var(--scc-r-bar);background:var(--scc-surface-2);font-size:var(--scc-fs-xs);line-height:var(--scc-lh-snug);color:var(--scc-muted)}\n.scc-foot a{color:var(--scc-accent-ink);font-weight:var(--scc-fw-med);text-decoration:none}\n.scc-foot a:hover{text-decoration:underline}\n.scc-foot__brand{display:inline-flex;align-items:center;gap:7px;font-weight:var(--scc-fw-med);color:var(--scc-ink-2)}\n\n@media (max-width:640px){.scc-hero__title{font-size:22px}.scc-hero__top{flex-direction:column-reverse;align-items:flex-start}}\n@media (prefers-reduced-motion:reduce){.scc *{transition:none!important}.scc-lampwrap::after{animation:none;opacity:0}.scc-spinner{animation:none}}\n";
+const KIT_CSS = "/* =========================================================================\n   Site-Check Accessibility — Connector Admin Panel (CSS)\n   Light-only, three states (connected / interrupted / disconnected).\n   Tokens are scoped to .scc (NOT :root) so they never clash with the host\n   CMS admin theme.\n   ========================================================================= */\n\n.scc{\n  /* Colors */\n  --scc-ink:#141613; --scc-ink-2:#39402f; --scc-muted:#5c6553; --scc-faint:#8b937d;\n  --scc-surface:#ffffff; --scc-surface-2:#f6f8f0;\n  --scc-border:#e4e8db; --scc-border-strong:#d6ddc7;\n  --scc-accent:#6d961d; --scc-accent-ink:#41600f; --scc-accent-tint:#eef4e0; --scc-accent-tint-bd:#d9e6bb;\n  --scc-warn-bg:#fbf4e2; --scc-warn-bd:#eed58a; --scc-warn-tx:#7a5900; --scc-warn-dot:#c58a00;\n  --scc-err-bg:#fbeeee; --scc-err-bd:#f0c2c2; --scc-err-tx:#9f1f1f; --scc-err-dot:#d13b3b;\n  --scc-neutral:#9aa389;\n  /* Typo-Skala */\n  --scc-fs-lead:15px; --scc-fs-base:14px; --scc-fs-sm:13px; --scc-fs-xs:12px; --scc-fs-label:12px;\n  /* Zeilenhöhen */\n  --scc-lh-snug:1.45; --scc-lh-body:1.62;\n  /* Gewichte */\n  --scc-fw-bold:800; --scc-fw-med:700; --scc-fw-reg:400;\n  /* Rhythmus & Form */\n  --scc-gap:14px; --scc-pad-card:24px 26px; --scc-pad-bar:14px 20px;\n  --scc-r-lg:20px; --scc-r-hero:22px; --scc-r-bar:14px; --scc-r-ctrl:12px;\n  --scc-shadow-hero:0 16px 40px rgba(24,34,10,.08); --scc-shadow-card:0 8px 24px rgba(24,34,10,.05);\n  --scc-font:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif;\n\n  max-width:820px;margin:6px 0 22px;color:var(--scc-ink);font-family:var(--scc-font);line-height:1.6\n}\n.scc *{box-sizing:border-box}\n\n/* Typo-Hierarchie — ausschließlich h1/h2/h3 verwenden, sonst nur <strong> zur Betonung */\n.scc-h1{margin:0;font-size:24px;line-height:1.18;font-weight:800;letter-spacing:-.012em;color:var(--scc-ink)}\n.scc-h2{margin:0;font-size:17px;line-height:1.28;font-weight:800;letter-spacing:-.006em;color:var(--scc-ink)}\n.scc-h3{margin:0;font-size:14px;line-height:1.3;font-weight:700;color:var(--scc-ink)}\n.scc strong,.scc b{font-weight:700}\n\n/* Brand bar */\n.scc-brandbar{display:flex;align-items:center;gap:16px;padding:var(--scc-pad-bar);background:var(--scc-surface);border:1px solid var(--scc-border);border-radius:var(--scc-r-bar);box-shadow:var(--scc-shadow-card);margin-bottom:var(--scc-gap)}\n.scc-brandbar__logo{height:26px;width:auto;display:block}\n.scc-brandbar__sep{width:1px;height:24px;background:var(--scc-border-strong)}\n.scc-brandbar__name{font-size:var(--scc-fs-base);font-weight:var(--scc-fw-med);letter-spacing:-.01em;color:var(--scc-ink)}\n.scc-brandbar__ver{color:var(--scc-muted);font-weight:var(--scc-fw-reg)}\n.scc-brandbar__spacer{flex:1}\n.scc-brandbar__help{font-size:var(--scc-fs-sm);font-weight:var(--scc-fw-med);color:var(--scc-muted);text-decoration:none;border-bottom:1px dotted var(--scc-border-strong)}\n.scc-brandbar__help:hover{color:var(--scc-accent-ink);border-bottom-color:var(--scc-accent)}\n\n/* Hero */\n.scc-hero{position:relative;overflow:hidden;border:1px solid var(--scc-border);border-radius:var(--scc-r-hero);background:linear-gradient(180deg,#fff 0%,var(--scc-surface-2) 100%);box-shadow:var(--scc-shadow-hero)}\n.scc-hero__in{position:relative;padding:var(--scc-pad-card)}\n.scc-hero__top{display:flex;justify-content:space-between;gap:20px;align-items:flex-start}\n.scc-hero__title{max-width:520px;text-wrap:balance}\n.scc-hero__lead{margin:11px 0 0;max-width:600px;font-size:var(--scc-fs-lead);line-height:var(--scc-lh-body);font-weight:var(--scc-fw-reg);color:var(--scc-muted)}\n\n/* Status signal lamp (text left, lamp right, centered in a soft halo, pulsing) */\n.scc-signal{position:relative;display:inline-flex;align-items:center;gap:12px;flex:0 0 auto;padding-top:2px}\n.scc-signal[data-tone=\"neutral\"]{--lamp:var(--scc-neutral)}\n.scc-signal[data-tone=\"ok\"]{--lamp:var(--scc-accent)}\n.scc-signal[data-tone=\"danger\"]{--lamp:var(--scc-err-dot)}\n.scc-signal__label{font-size:var(--scc-fs-sm);font-weight:var(--scc-fw-med);letter-spacing:.01em;white-space:nowrap;color:var(--scc-ink-2)}\n.scc-signal[data-tone=\"ok\"] .scc-signal__label{color:var(--scc-accent-ink)}\n.scc-signal[data-tone=\"danger\"] .scc-signal__label{color:var(--scc-err-tx)}\n.scc-lampwrap{position:relative;display:inline-block;width:12px;height:12px;flex:0 0 auto}\n.scc-lampwrap>*,.scc-lampwrap::before,.scc-lampwrap::after{position:absolute;top:50%;left:50%;border-radius:50%;transform:translate(-50%,-50%)}\n.scc-lampwrap::before{content:\"\";width:336px;height:336px;background:radial-gradient(circle,color-mix(in srgb,var(--lamp) 22%,transparent) 0%,transparent 70%);pointer-events:none}\n.scc-lampwrap::after{content:\"\";width:12px;height:12px;background:var(--lamp);opacity:.28;animation:scc-pulse 4.2s ease-out infinite;pointer-events:none}\n.scc-lamp{width:12px;height:12px;background:var(--lamp);box-shadow:0 0 6px color-mix(in srgb,var(--lamp) 65%,transparent)}\n@keyframes scc-pulse{0%{transform:translate(-50%,-50%) scale(1);opacity:.28}70%{transform:translate(-50%,-50%) scale(2.7);opacity:0}100%{transform:translate(-50%,-50%) scale(2.7);opacity:0}}\n\n/* Account hint — subtle text line inside hero, disconnected only */\n\n/* Manage — inside hero, connected/interrupted only */\n.scc-hero__manage{display:none;gap:10px;margin-top:20px;flex-wrap:wrap}\n.scc[data-state=\"connected\"] .scc-hero__manage,.scc[data-state=\"interrupted\"] .scc-hero__manage{display:flex}\n.scc[data-state=\"interrupted\"] .scc-btn--disconnect{display:none}\n\n/* Connect card */\n.scc-connect{margin-top:var(--scc-gap)}\n.scc[data-state=\"connected\"] .scc-connect{display:none}\n.scc-card{border:1px solid var(--scc-border);border-radius:var(--scc-r-lg);background:var(--scc-surface);box-shadow:var(--scc-shadow-card);padding:var(--scc-pad-card)}\n.scc-card__t{margin:0 0 8px}\n.scc-card__c{margin:0;font-size:var(--scc-fs-base);line-height:var(--scc-lh-body);font-weight:var(--scc-fw-reg);color:var(--scc-muted);max-width:60ch}\n\n.scc-label{display:block;margin:18px 0 7px;font-size:var(--scc-fs-label);font-weight:var(--scc-fw-med);letter-spacing:.01em;color:var(--scc-ink-2)}\n/* Verbinden (v2): ein Satz, ein Knopf; der Code reist ueber site-check.de */\n.scc-btn--connect{flex:0 0 auto;margin:16px 0 0;padding:13px 24px;font-size:var(--scc-fs-base)}\n/* Verbunden-Karte: nur im Zustand connected */\n.scc-done{display:none;margin-top:var(--scc-gap)}\n.scc[data-state=\"connected\"] .scc-done{display:block}\n.scc-done .scc-btn{display:inline-flex;margin-top:16px;text-decoration:none}\n@media (max-width:560px){.scc-btn--connect,.scc-done .scc-btn{width:100%;justify-content:center}}\n\n.scc-btn{appearance:none;border:none;border-radius:var(--scc-r-ctrl);padding:13px 18px;font:inherit;font-size:var(--scc-fs-base);font-weight:var(--scc-fw-bold);cursor:pointer;transition:transform .12s ease,box-shadow .12s ease,background .12s ease}\n.scc-btn:hover{transform:translateY(-1px)}\n.scc-btn:disabled{opacity:.55;cursor:not-allowed;transform:none}\n.scc-btn:focus-visible{outline:3px solid rgba(109,150,29,.5);outline-offset:2px}\n.scc-btn--sm{padding:8px 14px;font-size:var(--scc-fs-sm);border-radius:10px}\n/* Status aktualisieren: dezent, aber Rand mit >=3:1 Kontrast zum Hintergrund (WCAG 1.4.11) */\n.scc-btn--secondary{background:#fff;color:var(--scc-ink-2);border:1px solid #8a9078;box-shadow:0 1px 2px rgba(20,30,10,.08)}\n.scc-btn--secondary:hover{border-color:#6f7660;background:#fbfcf8}\n/* Verbindung trennen: ganz dezentes Hellrot */\n.scc-btn--danger{background:var(--scc-err-bg);color:var(--scc-err-tx);border:1px solid var(--scc-err-bd)}\n.scc-btn--danger:hover{background:#f7e2e2;border-color:#e6b0b0}\n/* Jetzt verbinden: der EINE farbige CTA */\n.scc-btn--accent{background:linear-gradient(120deg,rgb(98,129,0) 0%,rgb(30,90,60) 50%,rgb(0,3,128) 100%);color:#fff;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;box-shadow:0 8px 18px rgba(20,50,80,.26)}\n.scc-btn--accent:hover{filter:brightness(1.08)}\n.scc-spinner{display:inline-block;width:13px;height:13px;border-radius:50%;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;vertical-align:-2px;margin-right:8px;animation:scc-spin 1s linear infinite}\n@keyframes scc-spin{to{transform:rotate(360deg)}}\n\n/* Status-/Aktionsbanner */\n.scc-note{display:none;align-items:flex-start;gap:11px;border-radius:14px;padding:13px 15px;margin-top:14px;font-size:var(--scc-fs-sm);line-height:var(--scc-lh-body)}\n.scc-note.is-on{display:flex}\n.scc-note:before{content:\"\";width:9px;height:9px;border-radius:50%;margin-top:6px;flex:0 0 auto}\n.scc-note--ok{background:var(--scc-accent-tint);color:var(--scc-accent-ink);border:1px solid var(--scc-accent-tint-bd)}.scc-note--ok:before{background:var(--scc-accent)}\n.scc-note--warn{background:var(--scc-warn-bg);color:var(--scc-warn-tx);border:1px solid var(--scc-warn-bd)}.scc-note--warn:before{background:var(--scc-warn-dot)}\n.scc-note--err{background:var(--scc-err-bg);color:var(--scc-err-tx);border:1px solid var(--scc-err-bd)}.scc-note--err:before{background:var(--scc-err-dot)}\n.scc-note--info{background:var(--scc-surface-2);color:var(--scc-ink-2);border:1px solid var(--scc-border-strong)}.scc-note--info:before{background:var(--scc-neutral)}\n\n/* Settings */\n.scc-settings{margin-top:var(--scc-gap);border:1px solid var(--scc-border);border-radius:var(--scc-r-lg);background:var(--scc-surface);box-shadow:var(--scc-shadow-card);padding:var(--scc-pad-card)}\n.scc-settings__t{margin:0 0 4px}\n.scc-settings__c{margin:0 0 12px;font-size:var(--scc-fs-sm);line-height:var(--scc-lh-body);color:var(--scc-muted)}\n.scc-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 0;border-top:1px solid var(--scc-border)}\n.scc-row:first-of-type{border-top:none}\n.scc-row__t{margin:0}\n.scc-row__x{font-size:var(--scc-fs-xs);line-height:var(--scc-lh-snug);color:var(--scc-muted);margin-top:3px}\n.scc-toggle{position:relative;width:46px;height:26px;border-radius:999px;border:none;background:#c9d0bd;cursor:pointer;flex:0 0 auto;transition:background .15s ease}\n.scc-toggle:before{content:\"\";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .15s ease}\n.scc-toggle[aria-pressed=\"true\"]{background:var(--scc-accent)}\n.scc-toggle[aria-pressed=\"true\"]:before{transform:translateX(20px)}\n.scc-toggle:disabled{opacity:.55;cursor:not-allowed}\n.scc-toggle:focus-visible{outline:3px solid rgba(109,150,29,.5);outline-offset:2px}\n\n/* Footer */\n.scc-foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-top:var(--scc-gap);padding:var(--scc-pad-bar);border:1px solid var(--scc-border);border-radius:var(--scc-r-bar);background:var(--scc-surface-2);font-size:var(--scc-fs-xs);line-height:var(--scc-lh-snug);color:var(--scc-muted)}\n.scc-foot a{color:var(--scc-accent-ink);font-weight:var(--scc-fw-med);text-decoration:none}\n.scc-foot a:hover{text-decoration:underline}\n.scc-foot__brand{display:inline-flex;align-items:center;gap:7px;font-weight:var(--scc-fw-med);color:var(--scc-ink-2)}\n\n@media (max-width:640px){.scc-hero__title{font-size:22px}.scc-hero__top{flex-direction:column-reverse;align-items:flex-start}}\n@media (prefers-reduced-motion:reduce){.scc *{transition:none!important}.scc-lampwrap::after{animation:none;opacity:0}.scc-spinner{animation:none}}\n";
 
 /* The kit's tokens sit on .scc, so the admin theme cannot leak into the panel
    and vice versa. Only the host element itself needs a box. */
 const HOST_CSS = `:host{display:block}`;
 
 /* =========================================================================
-   Site-Check Accessibility — Connector Admin Panel (JS)
+   site-check Accessibility — Connector Admin Panel (JS)
 
    Transport-agnostic: reads its endpoints + state from data-* on the root
-   [data-sc-panel] element. When endpoints are present it drives connect /
-   disconnect / status-poll / overlay-toggle via fetch (live-async). When an
-   endpoint is absent the matching <form> keeps its native server POST as a
-   no-JS fallback.
+   [data-sc-panel] element and drives connect / disconnect / status-poll /
+   overlay-toggle via fetch.
+
+   Connecting (protocol v2, since 1.1.0, docs/connector-pairing.md):
+   1. „Mit site-check verbinden“ asks the plugin for a start URL
+      (connect-start: the plugin issues a one-time `state`) and goes there.
+   2. site-check.de sends the browser back to this page with
+      ?sitecheck_code=…&sitecheck_state=…; the kit posts both to the plugin's
+      connect endpoint, which checks the state before exchanging the code.
+   3. Connected: „Verbunden ✓“, and the tab closes itself when site-check
+      opened it (the two-tab flow), otherwise „Zu site-check“.
+   A legacy ?pairingCode= deep link from older webapps still works by click
+   (transition until 1.2.0); it never connects on its own.
 
    Two boot paths:
    - Light DOM (Grav 1.7 Twig, WordPress, TYPO3, Joomla): the adapter renders the
@@ -58,21 +67,38 @@ const HOST_CSS = `:host{display:block}`;
      with its own panel element once the markup is attached.
    ========================================================================= */
 (function (global) {
-  var panels = document.querySelectorAll('[data-sc-panel]');
-  for (var i = 0; i < panels.length; i++) { initPanel(panels[i]); }
+  var RETURN_CODE_PARAM = 'sitecheck_code';
+  var RETURN_STATE_PARAM = 'sitecheck_state';
+  var LEGACY_CODE_PARAMS = ['pairingCode', 'pairing'];
+  var CONNECTED_TAB_TITLE = '✓ Verbunden – site-check';
+  var CLOSE_DELAY_MS = 1200;
 
-  global.ScConnector = { initPanel: initPanel };
+  // TYPO3 (and other backends) render the module in an iframe of the same origin.
+  // Navigating, the tab title and closing belong to the whole tab: site-check
+  // refuses to be framed, so leaving the iframe alone showed a broken frame
+  // (hand test 14.10.2026). A foreign or missing top falls back to this window.
+  function tabWindow() {
+    try {
+      if (window.top && window.top !== window && window.top.location.origin === window.location.origin) {
+        return window.top;
+      }
+    } catch (e) { /* cross-origin top */ }
+    return window;
+  }
+  var STORED_ERROR_PREFIX = 'Letzter Versuch: ';
 
   function initPanel(panel) {
     if (!panel || panel.dataset.scInit === '1') { return; }
     panel.dataset.scInit = '1';
 
     var d = panel.dataset;
+    var connectStartEndpoint = d.connectStartEndpoint || '';
     var connectEndpoint = d.connectEndpoint || '';
     var disconnectEndpoint = d.disconnectEndpoint || '';
     var statusEndpoint = d.statusEndpoint || '';
     var overlayEndpoint = d.overlayEndpoint || '';
     var webappStatusEndpoint = d.webappStatusEndpoint || '';
+    var webappBaseUrl = (d.webappBaseUrl || '').replace(/\/+$/, '');
     var csrfToken = d.csrf || '';
     var csrfHeader = d.csrfHeader || '';
 
@@ -83,74 +109,59 @@ const HOST_CSS = `:host{display:block}`;
     var signal = panel.querySelector('[data-sc-signal]');
     var signalLabel = panel.querySelector('[data-sc-signal-label]');
     var heroLead = panel.querySelector('[data-sc-hero-lead]');
-    var connectTitle = panel.querySelector('[data-sc-connect-title]');
-    var codeInput = panel.querySelector('[data-sc-code]');
-    var codeFb = panel.querySelector('[data-sc-code-fb]');
+    var connectLead = panel.querySelector('[data-sc-connect-lead]');
     var connectBtn = panel.querySelector('[data-sc-connect]');
-    var connectBtnLabel = connectBtn ? (connectBtn.textContent || '').trim() : '';
     var disconnectBtn = panel.querySelector('[data-sc-disconnect]');
     var refreshBtn = panel.querySelector('[data-sc-refresh]');
     var note = panel.querySelector('[data-sc-note]');
     var overlayToggle = panel.querySelector('[data-sc-overlay-toggle]');
+    var dashboardLink = panel.querySelector('[data-sc-dashboard-link]');
 
-    // Pre-fill the pairing code from a ?pairingCode= / ?pairing= deep link.
-    try {
-      var q = new URLSearchParams(window.location.search);
-      var qc = q.get('pairingCode') || q.get('pairing') || '';
-      if (qc && codeInput && !codeInput.value) { codeInput.value = qc; }
-    } catch (e) { /* URLSearchParams unavailable — ignore */ }
+    var params = readParams();
+    var returnCode = params.get(RETURN_CODE_PARAM) || '';
+    var returnState = params.get(RETURN_STATE_PARAM) || '';
+    var legacyCode = '';
+    for (var p = 0; p < LEGACY_CODE_PARAMS.length && !legacyCode; p++) { legacyCode = params.get(LEGACY_CODE_PARAMS[p]) || ''; }
 
     // Maps the four server statuses onto the three visual states of the kit.
+    // Not connected, P-01 says it all in one sentence (L8): the hero stays quiet.
     var VIEW = {
       not_connected: {
         state: 'disconnected', tone: 'neutral', label: 'Nicht verbunden',
-        lead: 'Site-Check wendet geprüfte Barrierefreiheits-Fixes automatisch an. Verbinde die Website mit deinem Site-Check-Konto, um loszulegen.',
-        cTitle: 'Diese Website mit Site-Check verbinden', cBtn: 'Jetzt verbinden'
+        lead: ''
       },
       pairing_pending: {
         state: 'disconnected', tone: 'neutral', label: 'Wird verbunden …',
-        lead: 'Die Website tauscht gerade die Zugangsdaten mit Site-Check aus. Das dauert nur einen Moment.',
-        cTitle: 'Diese Website mit Site-Check verbinden', cBtn: 'Jetzt verbinden'
+        lead: ''
       },
       connected: {
         state: 'connected', tone: 'ok', label: 'Verbunden',
-        lead: 'Die Verbindung zur Site-Check-Webapp ist aktiv. Geprüfte Fixes und das Assistenz-Overlay werden ausgeliefert.',
-        cTitle: 'Diese Website mit Site-Check verbinden', cBtn: 'Jetzt verbinden'
+        lead: 'Geprüfte Fixes und das Assistenz-Widget werden ausgeliefert.'
       },
       error: {
         state: 'interrupted', tone: 'danger', label: 'Verbindung unterbrochen',
-        lead: 'Die Verbindung zur Site-Check-Webapp ist unterbrochen — aktuell werden keine Fixes ausgeliefert. Verbinde die Website neu oder prüfe den Status.',
-        cTitle: 'Verbindung wiederherstellen', cBtn: 'Erneut verbinden'
+        lead: 'Aktuell werden keine Fixes ausgeliefert.'
       }
     };
 
-    var PAIRING_CODE_PATTERN = /^[0-9a-fA-F]{48}$/;
+    var LABEL_CONNECT = 'Mit site-check verbinden';
+    var LABEL_RETRY = 'Noch einmal';
+    var LEAD_CONNECT = 'Verbinde diese Website mit site-check, damit Barrierefreiheits-Fehler automatisch behoben werden.';
+    var TEXT_BUSY = 'Wird verbunden …';
+    var TEXT_FAILED = 'Das hat nicht geklappt.';
 
-    /* ---- pairing-code live validation --------------------------------- */
-    function validateCode() {
-      if (!codeInput || !codeFb) { return; }
-      var v = (codeInput.value || '').trim();
-      if (!v) {
-        codeInput.removeAttribute('data-valid');
-        codeFb.removeAttribute('data-tone');
-        codeFb.textContent = '';
-        return;
-      }
-      if (PAIRING_CODE_PATTERN.test(v)) {
-        codeInput.setAttribute('data-valid', 'true');
-        codeFb.setAttribute('data-tone', 'valid');
-        codeFb.textContent = 'Format sieht gut aus.';
-      } else if (v.length < 48) {
-        codeInput.removeAttribute('data-valid');
-        codeFb.removeAttribute('data-tone');
-        codeFb.textContent = 'Noch ' + (48 - v.length) + ' Zeichen bis zur vollen Länge.';
-      } else {
-        codeInput.setAttribute('data-valid', 'false');
-        codeFb.setAttribute('data-tone', 'invalid');
-        codeFb.textContent = 'Der Code sollte genau 48 Hex-Zeichen (0–9, a–f) enthalten.';
-      }
+    function readParams() {
+      try { return new URLSearchParams(window.location.search); } catch (e) { return { get: function () { return null; } }; }
     }
-    if (codeInput) { codeInput.addEventListener('input', validateCode); validateCode(); }
+
+    /** Removes our one-time parameters so a reload does not post them again. */
+    function cleanUrl() {
+      try {
+        var url = new URL(window.location.href);
+        [RETURN_CODE_PARAM, RETURN_STATE_PARAM].concat(LEGACY_CODE_PARAMS).forEach(function (k) { url.searchParams.delete(k); });
+        window.history.replaceState(window.history.state, '', url.toString());
+      } catch (e) { /* history unavailable — harmless */ }
+    }
 
     /* ---- status banner ------------------------------------------------- */
     function setNote(tone, text) {
@@ -173,6 +184,13 @@ const HOST_CSS = `:host{display:block}`;
     function setLoading(loading) {
       [connectBtn, disconnectBtn, refreshBtn].forEach(function (b) { if (b) { b.disabled = loading; } });
     }
+    function setConnectLabel(text) { if (connectBtn) { connectBtn.textContent = text; } }
+
+    /** P-03 „Zu site-check“ leads to this website's dashboard (W-50 on the first visit). */
+    function setDashboardLink(websiteId) {
+      if (!dashboardLink || !webappBaseUrl || !websiteId) { return; }
+      dashboardLink.setAttribute('href', webappBaseUrl + '/app/websites/' + encodeURIComponent(websiteId) + '?verbunden=1');
+    }
 
     /* ---- apply a status object to the whole panel --------------------- */
     function applyStatus(connection) {
@@ -181,20 +199,16 @@ const HOST_CSS = `:host{display:block}`;
       panel.setAttribute('data-state', v.state);
       if (signal) { signal.setAttribute('data-tone', v.tone); }
       if (signalLabel) { signalLabel.textContent = v.label; }
-      if (heroLead) { heroLead.textContent = v.lead; }
-      if (connectTitle) { connectTitle.textContent = v.cTitle; }
-      if (connectBtn && v.cBtn && !connectBtn.disabled) { connectBtn.textContent = v.cBtn; connectBtnLabel = v.cBtn; }
+      if (heroLead) { heroLead.textContent = v.lead; heroLead.hidden = !v.lead; }
+      if (connection && connection.websiteId) { setDashboardLink(connection.websiteId); }
+      if (connectLead) { connectLead.textContent = LEAD_CONNECT; }
 
+      // A stored error is from an earlier attempt: after a reload it looked like
+      // the answer to a click that never happened (hand test 14.10.2026).
       if (connection && connection.lastError) {
-        setNote('err', connection.lastError);
-      } else if (connection && connection.lastNotice) {
+        setNote('err', STORED_ERROR_PREFIX + connection.lastError);
+      } else if (connection && connection.lastNotice && status !== 'connected') {
         setNote('warn', connection.lastNotice);
-      } else if (status === 'connected') {
-        setNote('ok', 'Die Verbindung zur Site-Check-Webapp ist aktiv.');
-      } else if (status === 'pairing_pending') {
-        setNote('info', 'Die Verbindung wird gerade vorbereitet …');
-      } else if (status === 'error') {
-        setNote('err', 'Die Verbindung ist unterbrochen. Bitte verbinde die Website neu.');
       } else {
         setNote(null, '');
       }
@@ -212,6 +226,12 @@ const HOST_CSS = `:host{display:block}`;
       try { data = raw ? JSON.parse(raw) : {}; } catch (e) { data = { __rawText: raw }; }
       return { data: data, raw: raw };
     }
+    function errorMessage(result, fallback) {
+      var e = result && result.error;
+      if (e && typeof e === 'object' && typeof e.message === 'string') { return e.message; }
+      if (typeof e === 'string' && e) { return e; }
+      return fallback;
+    }
     async function postJson(url, payload) {
       var response = await fetch(url, {
         method: 'POST',
@@ -221,10 +241,7 @@ const HOST_CSS = `:host{display:block}`;
       });
       var parsed = await parseJson(response);
       var result = parsed.data || {};
-      if (!response.ok || !result.success) {
-        var msg = (result && result.error && result.error.message) || result.error || 'Anfrage fehlgeschlagen.';
-        throw new Error(msg);
-      }
+      if (!response.ok || !result.success) { throw new Error(errorMessage(result, TEXT_FAILED)); }
       return result;
     }
 
@@ -234,7 +251,7 @@ const HOST_CSS = `:host{display:block}`;
         var response = await fetch(statusEndpoint, { credentials: 'same-origin', headers: authHeaders({ Accept: 'application/json' }) });
         var parsed = await parseJson(response);
         var result = parsed.data || {};
-        if (!response.ok || !result.success) { throw new Error((result && result.error && result.error.message) || 'Status konnte nicht geladen werden.'); }
+        if (!response.ok || !result.success) { throw new Error(errorMessage(result, 'Status konnte nicht geladen werden.')); }
         applyStatus(result.connection || {});
         if (notify) { setNote('info', 'Der Verbindungsstatus wurde aktualisiert.'); }
       } catch (error) {
@@ -251,75 +268,66 @@ const HOST_CSS = `:host{display:block}`;
         if (!response.ok || !result.success) { return; }
         if (result.reconciled === true) {
           await loadStatus(false);
-          if (result.authorized === false) {
-            setNote('warn', 'Die Webapp hat die Verbindung beendet. Bitte verbinde die Website neu.');
-          } else {
-            setNote('warn', 'Die Webapp meldet einen abweichenden Verbindungsstatus. Der lokale Zustand wurde zurückgesetzt.');
-          }
-          return;
-        }
-        if (result.authorized === true && result.webappReachable === false) {
-          setNote('warn', 'Die Webapp war gerade nicht erreichbar. Der angezeigte Status stammt lokal aus dem Plugin.');
+          setNote('warn', 'Die Verbindung wurde beendet. Bitte verbinde die Website neu.');
         }
       } catch (ignored) { /* silent — local state stays authoritative */ }
     }
 
-    /* ---- post-connect polling ----------------------------------------- */
-    var pollTimer = null, pollDeadline = 0;
-    function stopPoll() { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; } pollDeadline = 0; }
-    async function runPoll() {
-      if (!statusEndpoint) { return; }
-      try {
-        var response = await fetch(statusEndpoint, { credentials: 'same-origin', headers: authHeaders({ Accept: 'application/json' }) });
-        var parsed = await parseJson(response);
-        var result = parsed.data || {};
-        if (response.ok && result.success) {
-          applyStatus(result.connection || {});
-          if (result.connection && result.connection.status === 'connected') {
-            stopPoll();
-            setNote('ok', 'Die Website ist verbunden.');
-            return;
-          }
-        }
-      } catch (ignored) { /* keep polling until the deadline */ }
-      if (Date.now() >= pollDeadline) {
-        stopPoll();
-        setNote('warn', 'Wir konnten die Verbindung innerhalb von 2 Minuten nicht bestätigen. Prüfe den Status oder versuche es erneut.');
-        return;
+    /* ---- connected: say so, then hand the customer back ---------------- */
+    function finishConnected() {
+      applyStatus({ status: 'connected' });
+      var tab = tabWindow();
+      try { tab.document.title = CONNECTED_TAB_TITLE; } catch (e) { /* ignore */ }
+      // Only a tab that a script opened may close itself: the two-tab flow.
+      if (tab.opener) {
+        setTimeout(function () { try { tab.close(); } catch (e) { /* stays open, „Zu site-check“ remains */ } }, CLOSE_DELAY_MS);
       }
-      pollTimer = setTimeout(runPoll, 15000);
     }
-    function startPoll() { stopPoll(); pollDeadline = Date.now() + 120000; pollTimer = setTimeout(runPoll, 15000); }
 
-    /* ---- connect ------------------------------------------------------- */
-    async function doConnect(ev) {
-      // No async endpoint wired → let the native <form> submit (server fallback).
-      if (!connectEndpoint) { return; }
-      if (ev) { ev.preventDefault(); }
-      var code = (codeInput && codeInput.value || '').trim();
-      if (!code) { setNote('err', 'Bitte füge zuerst den Verbindungscode aus der Webapp ein.'); if (codeInput) { codeInput.focus(); } return; }
-      if (!PAIRING_CODE_PATTERN.test(code)) { setNote('err', 'Der Code sieht nicht richtig aus. Er sollte genau 48 Hex-Zeichen (0–9, a–f) enthalten.'); if (codeInput) { codeInput.focus(); } return; }
+    function showFailed(message) {
+      panel.setAttribute('data-state', 'disconnected');
+      setNote('err', message && message !== TEXT_FAILED ? TEXT_FAILED + ' ' + message : TEXT_FAILED);
+      setConnectLabel(LABEL_RETRY);
+    }
+
+    async function exchange(payload) {
       setLoading(true);
-      setBusyNote('Verbindung läuft, bitte warten …');
+      setBusyNote(TEXT_BUSY);
       try {
-        var result = await postJson(connectEndpoint, { pairingCode: code });
-        applyStatus(result.connection || {});
+        var result = await postJson(connectEndpoint, payload);
         if (result.connection && result.connection.status === 'connected') {
-          setNote('ok', 'Die Website wurde erfolgreich verbunden.');
-          stopPoll();
-        } else if (result.notice) {
-          setNote('warn', result.notice);
-          startPoll();
+          setNote(null, '');
+          setDashboardLink(result.connection.websiteId);
+          finishConnected();
         } else {
-          setNote('info', 'Verbindung wird bestätigt, das kann einen Moment dauern …');
-          startPoll();
+          await loadStatus(false);
         }
       } catch (error) {
-        stopPoll();
-        setNote('err', error instanceof Error ? error.message : 'Verbindung konnte nicht hergestellt werden.');
+        showFailed(error instanceof Error ? error.message : '');
       } finally {
         setLoading(false);
-        loadStatus(false);
+      }
+    }
+
+    /* ---- „Mit site-check verbinden“ ------------------------------------- */
+    async function startConnect(ev) {
+      if (ev) { ev.preventDefault(); }
+      // Transition: an old webapp sent a code along; use it on the explicit click.
+      if (legacyCode && connectEndpoint) {
+        var code = legacyCode;
+        legacyCode = '';
+        return exchange({ pairingCode: code });
+      }
+      if (!connectStartEndpoint) { return; }
+      setLoading(true);
+      setBusyNote(TEXT_BUSY);
+      try {
+        var result = await postJson(connectStartEndpoint, {});
+        if (!result.url) { throw new Error(''); }
+        tabWindow().location.assign(result.url);
+      } catch (error) {
+        setLoading(false);
+        showFailed(error instanceof Error ? error.message : '');
       }
     }
 
@@ -333,6 +341,7 @@ const HOST_CSS = `:host{display:block}`;
         var result = await postJson(disconnectEndpoint, {});
         applyStatus(result.connection || {});
         setNote('ok', 'Die Verbindung wurde getrennt.');
+        setConnectLabel(LABEL_CONNECT);
       } catch (error) {
         setNote('err', error instanceof Error ? error.message : 'Verbindung konnte nicht getrennt werden.');
       } finally {
@@ -352,31 +361,38 @@ const HOST_CSS = `:host{display:block}`;
         await postJson(overlayEndpoint, { enabled: next });
       } catch (error) {
         overlayToggle.setAttribute('aria-pressed', next ? 'false' : 'true'); // revert
-        setNote('err', 'Die Overlay-Einstellung konnte nicht gespeichert werden.');
+        setNote('err', 'Die Widget-Einstellung konnte nicht gespeichert werden.');
       } finally {
         overlayToggle.disabled = false;
       }
     }
 
-    /* ---- wire events (async when possible, native form as fallback) ---- */
-    bindSubmit(connectBtn, doConnect);
-    bindSubmit(disconnectBtn, doDisconnect);
+    /* ---- wire events ---------------------------------------------------- */
+    if (connectBtn) { connectBtn.addEventListener('click', startConnect); }
+    if (disconnectBtn) { disconnectBtn.addEventListener('click', doDisconnect); }
     if (refreshBtn) { refreshBtn.addEventListener('click', function (e) { e.preventDefault(); loadStatus(true); }); }
     if (overlayToggle) { overlayToggle.addEventListener('click', function (e) { e.preventDefault(); toggleOverlay(); }); }
 
-    function bindSubmit(btn, handler) {
-      if (!btn) { return; }
-      // The connect/disconnect controls are <button type="button"> (no enclosing
-      // form), so bind the action to the button's click — doConnect/doDisconnect
-      // call preventDefault themselves. Binding to a form's submit never fired.
-      btn.addEventListener('click', handler);
-    }
-
     /* ---- boot ---------------------------------------------------------- */
     applyStatus({ status: initialStatus, lastNotice: initialNotice, lastError: initialError });
+    setConnectLabel(LABEL_CONNECT);
+
+    if (returnCode && returnState && connectEndpoint) {
+      // Back from site-check.de: connect on our own, the customer already said yes there.
+      cleanUrl();
+      exchange({ pairingCode: returnCode, state: returnState });
+      return;
+    }
+    if (legacyCode) { cleanUrl(); }
     loadStatus(false);
     loadWebappStatus();
   }
+  // Boot last: initPanel reads the constants above, which a `var` only holds
+  // once its line has run (calling it from the top threw before the click
+  // handlers were wired, so „Mit site-check verbinden“ did nothing).
+  global.ScConnector = { initPanel: initPanel };
+  var panels = document.querySelectorAll('[data-sc-panel]');
+  for (var i = 0; i < panels.length; i++) { initPanel(panels[i]); }
 })(typeof globalThis !== 'undefined' ? globalThis : window);
 
 /* Wordmark paths from sc-logo.svg, inlined by sync.mjs (kept inline for
@@ -435,7 +451,9 @@ class ConnectPanelField extends HTMLElement {
 
         const status = state.status || 'not_connected';
         const webappBaseUrl = state.webappBaseUrl || 'https://site-check.de';
-        const registerUrl = `${webappBaseUrl.replace(/\/+$/, '')}/register`;
+        const dashboardUrl = state.websiteId
+            ? `${webappBaseUrl.replace(/\/+$/, '')}/app/websites/${encodeURIComponent(state.websiteId)}?verbunden=1`
+            : `${webappBaseUrl.replace(/\/+$/, '')}/app`;
 
         this.shadowRoot.innerHTML = `<style>${KIT_CSS}${HOST_CSS}</style>
             <div class="scc" data-sc-panel
@@ -444,6 +462,7 @@ class ConnectPanelField extends HTMLElement {
                 data-initial-notice="${esc(state.lastNotice)}"
                 data-initial-error="${esc(state.lastError)}"
                 data-connect-endpoint="${esc(state.adminConnectEndpoint)}"
+                data-connect-start-endpoint="${esc(state.adminConnectStartEndpoint)}"
                 data-disconnect-endpoint="${esc(state.adminDisconnectEndpoint)}"
                 data-status-endpoint="${esc(state.adminStatusEndpoint)}"
                 data-overlay-endpoint="${esc(state.adminOverlayEndpoint)}"
@@ -464,7 +483,7 @@ class ConnectPanelField extends HTMLElement {
                         <div class="scc-hero__top">
                             <div>
                                 <h1 class="scc-h1 scc-hero__title">Accessibility Connector</h1>
-                                <p class="scc-hero__lead" data-sc-hero-lead>Site-Check wendet geprüfte Barrierefreiheits-Fixes automatisch an. Verbinde die Website mit deinem Site-Check-Konto, um loszulegen.</p>
+                                <p class="scc-hero__lead" data-sc-hero-lead hidden></p>
                             </div>
                             <div class="scc-signal" data-sc-signal data-tone="neutral" role="status" aria-live="polite">
                                 <span class="scc-signal__label" data-sc-signal-label>Nicht verbunden</span>
@@ -472,7 +491,6 @@ class ConnectPanelField extends HTMLElement {
                             </div>
                         </div>
 
-                        <p class="scc-newhint"><strong>Neu bei Site-Check?</strong> Barrierefreiheit prüfen und Fixes automatisch anwenden — <a href="${esc(registerUrl)}" target="_blank" rel="noreferrer noopener">jetzt registrieren&nbsp;↗</a>.</p>
 
                         <div class="scc-hero__manage">
                             <button type="button" class="scc-btn scc-btn--secondary scc-btn--sm" data-sc-refresh>Status aktualisieren</button>
@@ -483,15 +501,17 @@ class ConnectPanelField extends HTMLElement {
 
                 <div class="scc-connect">
                     <section class="scc-card">
-                        <h2 class="scc-h2 scc-card__t" data-sc-connect-title>Diese Website mit Site-Check verbinden</h2>
-                        <p class="scc-card__c">Füge den Verbindungscode aus deiner Site-Check-Webapp ein und klicke auf <strong>Jetzt verbinden</strong>. Den Code bekommst du im Verbindungs-Assistenten der Webapp.</p>
-                        <label class="scc-label" for="sc-acc-pairing-code">Verbindungscode</label>
-                        <div class="scc-connect-row">
-                            <input class="scc-input" id="sc-acc-pairing-code" name="pairingCode" type="text" placeholder="Code aus der Webapp einfügen" autocomplete="off" spellcheck="false" data-sc-code aria-describedby="sc-acc-code-fb">
-                            <button type="button" class="scc-btn scc-btn--accent scc-btn--connect" data-sc-connect>Jetzt verbinden</button>
-                        </div>
-                        <div class="scc-fb" id="sc-acc-code-fb" data-sc-code-fb aria-live="polite"></div>
-                        <div class="scc-note" data-sc-note></div>
+                        <h2 class="scc-h2 scc-card__t">site-check</h2>
+                        <p class="scc-card__c" data-sc-connect-lead>Verbinde diese Website mit site-check, damit Barrierefreiheits-Fehler automatisch behoben werden.</p>
+                        <button type="button" class="scc-btn scc-btn--accent scc-btn--connect" data-sc-connect>Mit site-check verbinden</button>
+                        <div class="scc-note" data-sc-note role="status" aria-live="polite"></div>
+                    </section>
+                </div>
+
+                <div class="scc-done">
+                    <section class="scc-card">
+                        <h2 class="scc-h2 scc-card__t">Verbunden ✓</h2>
+                        <a class="scc-btn scc-btn--accent" href="${esc(dashboardUrl)}" target="_blank" rel="noopener" data-sc-dashboard-link>Zu site-check</a>
                     </section>
                 </div>
 
@@ -499,8 +519,8 @@ class ConnectPanelField extends HTMLElement {
                     <h2 class="scc-h2 scc-settings__t">Einstellungen</h2>
                     <p class="scc-settings__c">Technische Grundeinstellungen des Connectors.</p>
                     <div class="scc-row">
-                        <div><h3 class="scc-h3 scc-row__t">Assistenz-Overlay erlauben</h3><div class="scc-row__x">Erlaubt der Webapp, das Site-Check-Bedienhilfen-Overlay für Besucher*innen einzublenden.</div></div>
-                        <button type="button" class="scc-toggle" data-sc-overlay-toggle aria-pressed="${state.overlayRuntimeEnabled === false ? 'false' : 'true'}" aria-label="Assistenz-Overlay erlauben"></button>
+                        <div><h3 class="scc-h3 scc-row__t">Assistenz-Widget erlauben</h3><div class="scc-row__x">Erlaubt der Webapp, das site-check-Assistenz-Widget für Besucher*innen einzublenden.</div></div>
+                        <button type="button" class="scc-toggle" data-sc-overlay-toggle aria-pressed="${state.overlayRuntimeEnabled === false ? 'false' : 'true'}" aria-label="Assistenz-Widget erlauben"></button>
                     </div>
                 </section>
 

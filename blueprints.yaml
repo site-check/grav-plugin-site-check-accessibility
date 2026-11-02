@@ -1,8 +1,8 @@
 name: Site-Check Accessibility
 slug: site-check-accessibility
 type: plugin
-version: 1.0.4
-description: "Verbindet eine Grav-Website mit der Site-Check Accessibility-Webapp und schreibt geprüfte Barrierefreiheits-Fixes serverseitig in die ausgelieferte Seite. Inkl. optionalem Assistenz-Overlay."
+version: 1.3.0
+description: "Verbindet eine Grav-Website mit der Site-Check Accessibility-Webapp und schreibt geprüfte Barrierefreiheits-Fixes serverseitig in die ausgelieferte Seite. Inkl. optionalem Assistenz-Widget."
 icon: universal-access
 author:
   name: site-works AG
@@ -11,7 +11,7 @@ author:
 homepage: https://site-check.de
 docs: https://github.com/site-check/grav-plugin-site-check-accessibility#readme
 bugs: https://github.com/site-check/grav-plugin-site-check-accessibility/issues
-keywords: accessibility, a11y, wcag, bfsg, barrierefreiheit, overlay, connector
+keywords: accessibility, a11y, wcag, bfsg, barrierefreiheit, widget, connector
 license: MIT
 dependencies:
   - { name: grav, version: '>=1.7.0' }
@@ -52,7 +52,7 @@ form:
         enabled:
           type: toggle
           label: Plugin aktiviert
-          help: Wenn deaktiviert, sind Connector, Overlay und Runtime-Overrides ausgeschaltet.
+          help: Wenn deaktiviert, sind Connector, Assistenz-Widget und Runtime-Overrides ausgeschaltet.
           highlight: 1
           default: 1
           options:
@@ -62,5 +62,5 @@ form:
             type: bool
 
         # overlay_runtime_enabled wird im Connector-Panel oben als Toggle
-        # „Assistenz-Overlay erlauben" verwaltet (set-overlay-Endpunkt).
+        # „Assistenz-Widget erlauben" verwaltet (set-overlay-Endpunkt).
         # Der Config-Wert bleibt bestehen; hier bewusst kein doppeltes Feld.

@@ -23,14 +23,18 @@ nachgezogen.
 
 - **Bild-Alternativtexte**, ARIA-Label, Kontrast- und CSS-Korrekturen
 - Struktur-Korrekturen (z. B. Überschriften-Ebenen, Listen, Beschriftungen)
-- Optionales **Accessibility-Overlay** (Assistenzfunktion, kein Ersatz für echte
+- Optionales **Assistenz-Widget** (Assistenzfunktion, kein Ersatz für echte
   Fixes)
+- **Untertitel und Audiodeskription** für Videos und Audios: als `<track>`-Element
+  im Markup, also auch in den Bedienelementen des Browsers nutzbar
 - Geführte Website-Verbindung direkt im Grav-Admin
 
 Alle Änderungen sind **nachvollziehbar und jederzeit widerrufbar**: Sie werden
 nur ausgeliefert, solange eine aktive Verbindung **und** ein gültiges Abonnement
 bestehen. Wird die Website getrennt oder das Abo beendet, entfernt das Plugin die
 Fixes automatisch beim nächsten Seitenaufruf.
+Untertiteldateien bleiben dabei auf dem Server liegen und unter ihrer URL
+erreichbar, nur die Einbindung ins Markup entfällt.
 
 ### Installation
 
@@ -55,9 +59,9 @@ Site-Check Accessibility**:
 
 - **Verbindung** — Pairing-Code aus der Webapp eintragen, Verbindungsstatus
   einsehen oder Verbindung trennen.
-- **Assistenz-Overlay erlauben** — schaltet das optionale Overlay für die
+- **Assistenz-Widget erlauben** — schaltet das optionale Widget für die
   Website an/aus.
-- **Plugin aktiviert** — globaler Schalter; deaktiviert Connector, Overlay und
+- **Plugin aktiviert** — globaler Schalter; deaktiviert Connector, Widget und
   Runtime-Overrides.
 
 ### Hinter einem Reverse-Proxy
@@ -67,8 +71,8 @@ Caddy, nginx vor Apache, Load Balancer), kennt Grav seine öffentliche Adresse n
 aus den `X-Forwarded-*`-Headern des Proxys. **Grav 2 wertet diese Header ab Werk
 nicht aus**, Grav 1.7 übernimmt `X-Forwarded-Proto` und `X-Forwarded-Port`. Grav
 meldet sich dann als `http://…` oder mit dem internen Port, und das Verbinden
-scheitert mit „pluginBaseUrl passt nicht zur erwarteten Website-URL“. Das Panel
-nennt in diesem Fall beide Adressen.
+scheitert, weil die Adresse nicht zur Website in site-check passt. Das Grav-Log
+(`logs/grav.log`) nennt in diesem Fall beide Adressen.
 
 Abhilfe in `user/config/system.yaml`, eine der beiden Varianten:
 
@@ -110,12 +114,17 @@ target site's own JavaScript fall back to a small client script.
 - Structural fixes (heading levels, lists, labels, …)
 - Optional **accessibility overlay** (an assistive aid, not a replacement for
   real fixes)
+- **Captions and audio descriptions** for video and audio, written as a
+  `<track>` element into the markup and therefore usable in the browser's own
+  controls
 - Guided site connection inside the Grav admin
 
 Every change is **traceable and fully reversible**: fixes are only delivered
 while an active connection **and** a valid subscription exist. Disconnecting the
 site or ending the subscription removes the fixes automatically on the next page
 load.
+Caption files stay on the server and remain reachable under their URL, only
+the embedding into the markup goes away.
 
 ### Installation
 
@@ -139,8 +148,8 @@ Accessibility**:
 
 - **Connection** — enter the pairing code from the web app, view the connection
   status, or disconnect.
-- **Allow assistance overlay** — toggles the optional overlay for the site.
-- **Plugin enabled** — global switch; turns off the connector, overlay and
+- **Allow assistance widget** — toggles the optional widget for the site.
+- **Plugin enabled** — global switch; turns off the connector, widget and
   runtime overrides.
 
 ### Behind a reverse proxy
@@ -149,9 +158,9 @@ If HTTPS ends at a proxy in front of Grav (e.g. Docker with Traefik or Caddy,
 nginx in front of Apache, a load balancer), Grav only learns its public address
 from the proxy's `X-Forwarded-*` headers. **Grav 2 ignores these headers by
 default**; Grav 1.7 applies `X-Forwarded-Proto` and `X-Forwarded-Port`. Grav then
-reports itself as `http://…` or with the internal port, and connecting fails with
-"pluginBaseUrl passt nicht zur erwarteten Website-URL". The panel names both
-addresses in that case.
+reports itself as `http://…` or with the internal port, and connecting fails
+because the address does not match the website in site-check. The Grav log
+(`logs/grav.log`) names both addresses in that case.
 
 Fix it in `user/config/system.yaml` with one of these:
 

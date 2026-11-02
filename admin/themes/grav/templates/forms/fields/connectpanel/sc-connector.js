@@ -1,11 +1,20 @@
 /* =========================================================================
-   Site-Check Accessibility — Connector Admin Panel (JS)
+   site-check Accessibility — Connector Admin Panel (JS)
 
    Transport-agnostic: reads its endpoints + state from data-* on the root
-   [data-sc-panel] element. When endpoints are present it drives connect /
-   disconnect / status-poll / overlay-toggle via fetch (live-async). When an
-   endpoint is absent the matching <form> keeps its native server POST as a
-   no-JS fallback.
+   [data-sc-panel] element and drives connect / disconnect / status-poll /
+   overlay-toggle via fetch.
+
+   Connecting (protocol v2, since 1.1.0, docs/connector-pairing.md):
+   1. „Mit site-check verbinden“ asks the plugin for a start URL
+      (connect-start: the plugin issues a one-time `state`) and goes there.
+   2. site-check.de sends the browser back to this page with
+      ?sitecheck_code=…&sitecheck_state=…; the kit posts both to the plugin's
+      connect endpoint, which checks the state before exchanging the code.
+   3. Connected: „Verbunden ✓“, and the tab closes itself when site-check
+      opened it (the two-tab flow), otherwise „Zu site-check“.
+   A legacy ?pairingCode= deep link from older webapps still works by click
+   (transition until 1.2.0); it never connects on its own.
 
    Two boot paths:
    - Light DOM (Grav 1.7 Twig, WordPress, TYPO3, Joomla): the adapter renders the
@@ -15,21 +24,38 @@
      with its own panel element once the markup is attached.
    ========================================================================= */
 (function (global) {
-  var panels = document.querySelectorAll('[data-sc-panel]');
-  for (var i = 0; i < panels.length; i++) { initPanel(panels[i]); }
+  var RETURN_CODE_PARAM = 'sitecheck_code';
+  var RETURN_STATE_PARAM = 'sitecheck_state';
+  var LEGACY_CODE_PARAMS = ['pairingCode', 'pairing'];
+  var CONNECTED_TAB_TITLE = '✓ Verbunden – site-check';
+  var CLOSE_DELAY_MS = 1200;
 
-  global.ScConnector = { initPanel: initPanel };
+  // TYPO3 (and other backends) render the module in an iframe of the same origin.
+  // Navigating, the tab title and closing belong to the whole tab: site-check
+  // refuses to be framed, so leaving the iframe alone showed a broken frame
+  // (hand test 14.10.2026). A foreign or missing top falls back to this window.
+  function tabWindow() {
+    try {
+      if (window.top && window.top !== window && window.top.location.origin === window.location.origin) {
+        return window.top;
+      }
+    } catch (e) { /* cross-origin top */ }
+    return window;
+  }
+  var STORED_ERROR_PREFIX = 'Letzter Versuch: ';
 
   function initPanel(panel) {
     if (!panel || panel.dataset.scInit === '1') { return; }
     panel.dataset.scInit = '1';
 
     var d = panel.dataset;
+    var connectStartEndpoint = d.connectStartEndpoint || '';
     var connectEndpoint = d.connectEndpoint || '';
     var disconnectEndpoint = d.disconnectEndpoint || '';
     var statusEndpoint = d.statusEndpoint || '';
     var overlayEndpoint = d.overlayEndpoint || '';
     var webappStatusEndpoint = d.webappStatusEndpoint || '';
+    var webappBaseUrl = (d.webappBaseUrl || '').replace(/\/+$/, '');
     var csrfToken = d.csrf || '';
     var csrfHeader = d.csrfHeader || '';
 
@@ -40,74 +66,59 @@
     var signal = panel.querySelector('[data-sc-signal]');
     var signalLabel = panel.querySelector('[data-sc-signal-label]');
     var heroLead = panel.querySelector('[data-sc-hero-lead]');
-    var connectTitle = panel.querySelector('[data-sc-connect-title]');
-    var codeInput = panel.querySelector('[data-sc-code]');
-    var codeFb = panel.querySelector('[data-sc-code-fb]');
+    var connectLead = panel.querySelector('[data-sc-connect-lead]');
     var connectBtn = panel.querySelector('[data-sc-connect]');
-    var connectBtnLabel = connectBtn ? (connectBtn.textContent || '').trim() : '';
     var disconnectBtn = panel.querySelector('[data-sc-disconnect]');
     var refreshBtn = panel.querySelector('[data-sc-refresh]');
     var note = panel.querySelector('[data-sc-note]');
     var overlayToggle = panel.querySelector('[data-sc-overlay-toggle]');
+    var dashboardLink = panel.querySelector('[data-sc-dashboard-link]');
 
-    // Pre-fill the pairing code from a ?pairingCode= / ?pairing= deep link.
-    try {
-      var q = new URLSearchParams(window.location.search);
-      var qc = q.get('pairingCode') || q.get('pairing') || '';
-      if (qc && codeInput && !codeInput.value) { codeInput.value = qc; }
-    } catch (e) { /* URLSearchParams unavailable — ignore */ }
+    var params = readParams();
+    var returnCode = params.get(RETURN_CODE_PARAM) || '';
+    var returnState = params.get(RETURN_STATE_PARAM) || '';
+    var legacyCode = '';
+    for (var p = 0; p < LEGACY_CODE_PARAMS.length && !legacyCode; p++) { legacyCode = params.get(LEGACY_CODE_PARAMS[p]) || ''; }
 
     // Maps the four server statuses onto the three visual states of the kit.
+    // Not connected, P-01 says it all in one sentence (L8): the hero stays quiet.
     var VIEW = {
       not_connected: {
         state: 'disconnected', tone: 'neutral', label: 'Nicht verbunden',
-        lead: 'Site-Check wendet geprüfte Barrierefreiheits-Fixes automatisch an. Verbinde die Website mit deinem Site-Check-Konto, um loszulegen.',
-        cTitle: 'Diese Website mit Site-Check verbinden', cBtn: 'Jetzt verbinden'
+        lead: ''
       },
       pairing_pending: {
         state: 'disconnected', tone: 'neutral', label: 'Wird verbunden …',
-        lead: 'Die Website tauscht gerade die Zugangsdaten mit Site-Check aus. Das dauert nur einen Moment.',
-        cTitle: 'Diese Website mit Site-Check verbinden', cBtn: 'Jetzt verbinden'
+        lead: ''
       },
       connected: {
         state: 'connected', tone: 'ok', label: 'Verbunden',
-        lead: 'Die Verbindung zur Site-Check-Webapp ist aktiv. Geprüfte Fixes und das Assistenz-Overlay werden ausgeliefert.',
-        cTitle: 'Diese Website mit Site-Check verbinden', cBtn: 'Jetzt verbinden'
+        lead: 'Geprüfte Fixes und das Assistenz-Widget werden ausgeliefert.'
       },
       error: {
         state: 'interrupted', tone: 'danger', label: 'Verbindung unterbrochen',
-        lead: 'Die Verbindung zur Site-Check-Webapp ist unterbrochen — aktuell werden keine Fixes ausgeliefert. Verbinde die Website neu oder prüfe den Status.',
-        cTitle: 'Verbindung wiederherstellen', cBtn: 'Erneut verbinden'
+        lead: 'Aktuell werden keine Fixes ausgeliefert.'
       }
     };
 
-    var PAIRING_CODE_PATTERN = /^[0-9a-fA-F]{48}$/;
+    var LABEL_CONNECT = 'Mit site-check verbinden';
+    var LABEL_RETRY = 'Noch einmal';
+    var LEAD_CONNECT = 'Verbinde diese Website mit site-check, damit Barrierefreiheits-Fehler automatisch behoben werden.';
+    var TEXT_BUSY = 'Wird verbunden …';
+    var TEXT_FAILED = 'Das hat nicht geklappt.';
 
-    /* ---- pairing-code live validation --------------------------------- */
-    function validateCode() {
-      if (!codeInput || !codeFb) { return; }
-      var v = (codeInput.value || '').trim();
-      if (!v) {
-        codeInput.removeAttribute('data-valid');
-        codeFb.removeAttribute('data-tone');
-        codeFb.textContent = '';
-        return;
-      }
-      if (PAIRING_CODE_PATTERN.test(v)) {
-        codeInput.setAttribute('data-valid', 'true');
-        codeFb.setAttribute('data-tone', 'valid');
-        codeFb.textContent = 'Format sieht gut aus.';
-      } else if (v.length < 48) {
-        codeInput.removeAttribute('data-valid');
-        codeFb.removeAttribute('data-tone');
-        codeFb.textContent = 'Noch ' + (48 - v.length) + ' Zeichen bis zur vollen Länge.';
-      } else {
-        codeInput.setAttribute('data-valid', 'false');
-        codeFb.setAttribute('data-tone', 'invalid');
-        codeFb.textContent = 'Der Code sollte genau 48 Hex-Zeichen (0–9, a–f) enthalten.';
-      }
+    function readParams() {
+      try { return new URLSearchParams(window.location.search); } catch (e) { return { get: function () { return null; } }; }
     }
-    if (codeInput) { codeInput.addEventListener('input', validateCode); validateCode(); }
+
+    /** Removes our one-time parameters so a reload does not post them again. */
+    function cleanUrl() {
+      try {
+        var url = new URL(window.location.href);
+        [RETURN_CODE_PARAM, RETURN_STATE_PARAM].concat(LEGACY_CODE_PARAMS).forEach(function (k) { url.searchParams.delete(k); });
+        window.history.replaceState(window.history.state, '', url.toString());
+      } catch (e) { /* history unavailable — harmless */ }
+    }
 
     /* ---- status banner ------------------------------------------------- */
     function setNote(tone, text) {
@@ -130,6 +141,13 @@
     function setLoading(loading) {
       [connectBtn, disconnectBtn, refreshBtn].forEach(function (b) { if (b) { b.disabled = loading; } });
     }
+    function setConnectLabel(text) { if (connectBtn) { connectBtn.textContent = text; } }
+
+    /** P-03 „Zu site-check“ leads to this website's dashboard (W-50 on the first visit). */
+    function setDashboardLink(websiteId) {
+      if (!dashboardLink || !webappBaseUrl || !websiteId) { return; }
+      dashboardLink.setAttribute('href', webappBaseUrl + '/app/websites/' + encodeURIComponent(websiteId) + '?verbunden=1');
+    }
 
     /* ---- apply a status object to the whole panel --------------------- */
     function applyStatus(connection) {
@@ -138,20 +156,16 @@
       panel.setAttribute('data-state', v.state);
       if (signal) { signal.setAttribute('data-tone', v.tone); }
       if (signalLabel) { signalLabel.textContent = v.label; }
-      if (heroLead) { heroLead.textContent = v.lead; }
-      if (connectTitle) { connectTitle.textContent = v.cTitle; }
-      if (connectBtn && v.cBtn && !connectBtn.disabled) { connectBtn.textContent = v.cBtn; connectBtnLabel = v.cBtn; }
+      if (heroLead) { heroLead.textContent = v.lead; heroLead.hidden = !v.lead; }
+      if (connection && connection.websiteId) { setDashboardLink(connection.websiteId); }
+      if (connectLead) { connectLead.textContent = LEAD_CONNECT; }
 
+      // A stored error is from an earlier attempt: after a reload it looked like
+      // the answer to a click that never happened (hand test 14.10.2026).
       if (connection && connection.lastError) {
-        setNote('err', connection.lastError);
-      } else if (connection && connection.lastNotice) {
+        setNote('err', STORED_ERROR_PREFIX + connection.lastError);
+      } else if (connection && connection.lastNotice && status !== 'connected') {
         setNote('warn', connection.lastNotice);
-      } else if (status === 'connected') {
-        setNote('ok', 'Die Verbindung zur Site-Check-Webapp ist aktiv.');
-      } else if (status === 'pairing_pending') {
-        setNote('info', 'Die Verbindung wird gerade vorbereitet …');
-      } else if (status === 'error') {
-        setNote('err', 'Die Verbindung ist unterbrochen. Bitte verbinde die Website neu.');
       } else {
         setNote(null, '');
       }
@@ -169,6 +183,12 @@
       try { data = raw ? JSON.parse(raw) : {}; } catch (e) { data = { __rawText: raw }; }
       return { data: data, raw: raw };
     }
+    function errorMessage(result, fallback) {
+      var e = result && result.error;
+      if (e && typeof e === 'object' && typeof e.message === 'string') { return e.message; }
+      if (typeof e === 'string' && e) { return e; }
+      return fallback;
+    }
     async function postJson(url, payload) {
       var response = await fetch(url, {
         method: 'POST',
@@ -178,10 +198,7 @@
       });
       var parsed = await parseJson(response);
       var result = parsed.data || {};
-      if (!response.ok || !result.success) {
-        var msg = (result && result.error && result.error.message) || result.error || 'Anfrage fehlgeschlagen.';
-        throw new Error(msg);
-      }
+      if (!response.ok || !result.success) { throw new Error(errorMessage(result, TEXT_FAILED)); }
       return result;
     }
 
@@ -191,7 +208,7 @@
         var response = await fetch(statusEndpoint, { credentials: 'same-origin', headers: authHeaders({ Accept: 'application/json' }) });
         var parsed = await parseJson(response);
         var result = parsed.data || {};
-        if (!response.ok || !result.success) { throw new Error((result && result.error && result.error.message) || 'Status konnte nicht geladen werden.'); }
+        if (!response.ok || !result.success) { throw new Error(errorMessage(result, 'Status konnte nicht geladen werden.')); }
         applyStatus(result.connection || {});
         if (notify) { setNote('info', 'Der Verbindungsstatus wurde aktualisiert.'); }
       } catch (error) {
@@ -208,75 +225,66 @@
         if (!response.ok || !result.success) { return; }
         if (result.reconciled === true) {
           await loadStatus(false);
-          if (result.authorized === false) {
-            setNote('warn', 'Die Webapp hat die Verbindung beendet. Bitte verbinde die Website neu.');
-          } else {
-            setNote('warn', 'Die Webapp meldet einen abweichenden Verbindungsstatus. Der lokale Zustand wurde zurückgesetzt.');
-          }
-          return;
-        }
-        if (result.authorized === true && result.webappReachable === false) {
-          setNote('warn', 'Die Webapp war gerade nicht erreichbar. Der angezeigte Status stammt lokal aus dem Plugin.');
+          setNote('warn', 'Die Verbindung wurde beendet. Bitte verbinde die Website neu.');
         }
       } catch (ignored) { /* silent — local state stays authoritative */ }
     }
 
-    /* ---- post-connect polling ----------------------------------------- */
-    var pollTimer = null, pollDeadline = 0;
-    function stopPoll() { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; } pollDeadline = 0; }
-    async function runPoll() {
-      if (!statusEndpoint) { return; }
-      try {
-        var response = await fetch(statusEndpoint, { credentials: 'same-origin', headers: authHeaders({ Accept: 'application/json' }) });
-        var parsed = await parseJson(response);
-        var result = parsed.data || {};
-        if (response.ok && result.success) {
-          applyStatus(result.connection || {});
-          if (result.connection && result.connection.status === 'connected') {
-            stopPoll();
-            setNote('ok', 'Die Website ist verbunden.');
-            return;
-          }
-        }
-      } catch (ignored) { /* keep polling until the deadline */ }
-      if (Date.now() >= pollDeadline) {
-        stopPoll();
-        setNote('warn', 'Wir konnten die Verbindung innerhalb von 2 Minuten nicht bestätigen. Prüfe den Status oder versuche es erneut.');
-        return;
+    /* ---- connected: say so, then hand the customer back ---------------- */
+    function finishConnected() {
+      applyStatus({ status: 'connected' });
+      var tab = tabWindow();
+      try { tab.document.title = CONNECTED_TAB_TITLE; } catch (e) { /* ignore */ }
+      // Only a tab that a script opened may close itself: the two-tab flow.
+      if (tab.opener) {
+        setTimeout(function () { try { tab.close(); } catch (e) { /* stays open, „Zu site-check“ remains */ } }, CLOSE_DELAY_MS);
       }
-      pollTimer = setTimeout(runPoll, 15000);
     }
-    function startPoll() { stopPoll(); pollDeadline = Date.now() + 120000; pollTimer = setTimeout(runPoll, 15000); }
 
-    /* ---- connect ------------------------------------------------------- */
-    async function doConnect(ev) {
-      // No async endpoint wired → let the native <form> submit (server fallback).
-      if (!connectEndpoint) { return; }
-      if (ev) { ev.preventDefault(); }
-      var code = (codeInput && codeInput.value || '').trim();
-      if (!code) { setNote('err', 'Bitte füge zuerst den Verbindungscode aus der Webapp ein.'); if (codeInput) { codeInput.focus(); } return; }
-      if (!PAIRING_CODE_PATTERN.test(code)) { setNote('err', 'Der Code sieht nicht richtig aus. Er sollte genau 48 Hex-Zeichen (0–9, a–f) enthalten.'); if (codeInput) { codeInput.focus(); } return; }
+    function showFailed(message) {
+      panel.setAttribute('data-state', 'disconnected');
+      setNote('err', message && message !== TEXT_FAILED ? TEXT_FAILED + ' ' + message : TEXT_FAILED);
+      setConnectLabel(LABEL_RETRY);
+    }
+
+    async function exchange(payload) {
       setLoading(true);
-      setBusyNote('Verbindung läuft, bitte warten …');
+      setBusyNote(TEXT_BUSY);
       try {
-        var result = await postJson(connectEndpoint, { pairingCode: code });
-        applyStatus(result.connection || {});
+        var result = await postJson(connectEndpoint, payload);
         if (result.connection && result.connection.status === 'connected') {
-          setNote('ok', 'Die Website wurde erfolgreich verbunden.');
-          stopPoll();
-        } else if (result.notice) {
-          setNote('warn', result.notice);
-          startPoll();
+          setNote(null, '');
+          setDashboardLink(result.connection.websiteId);
+          finishConnected();
         } else {
-          setNote('info', 'Verbindung wird bestätigt, das kann einen Moment dauern …');
-          startPoll();
+          await loadStatus(false);
         }
       } catch (error) {
-        stopPoll();
-        setNote('err', error instanceof Error ? error.message : 'Verbindung konnte nicht hergestellt werden.');
+        showFailed(error instanceof Error ? error.message : '');
       } finally {
         setLoading(false);
-        loadStatus(false);
+      }
+    }
+
+    /* ---- „Mit site-check verbinden“ ------------------------------------- */
+    async function startConnect(ev) {
+      if (ev) { ev.preventDefault(); }
+      // Transition: an old webapp sent a code along; use it on the explicit click.
+      if (legacyCode && connectEndpoint) {
+        var code = legacyCode;
+        legacyCode = '';
+        return exchange({ pairingCode: code });
+      }
+      if (!connectStartEndpoint) { return; }
+      setLoading(true);
+      setBusyNote(TEXT_BUSY);
+      try {
+        var result = await postJson(connectStartEndpoint, {});
+        if (!result.url) { throw new Error(''); }
+        tabWindow().location.assign(result.url);
+      } catch (error) {
+        setLoading(false);
+        showFailed(error instanceof Error ? error.message : '');
       }
     }
 
@@ -290,6 +298,7 @@
         var result = await postJson(disconnectEndpoint, {});
         applyStatus(result.connection || {});
         setNote('ok', 'Die Verbindung wurde getrennt.');
+        setConnectLabel(LABEL_CONNECT);
       } catch (error) {
         setNote('err', error instanceof Error ? error.message : 'Verbindung konnte nicht getrennt werden.');
       } finally {
@@ -309,29 +318,36 @@
         await postJson(overlayEndpoint, { enabled: next });
       } catch (error) {
         overlayToggle.setAttribute('aria-pressed', next ? 'false' : 'true'); // revert
-        setNote('err', 'Die Overlay-Einstellung konnte nicht gespeichert werden.');
+        setNote('err', 'Die Widget-Einstellung konnte nicht gespeichert werden.');
       } finally {
         overlayToggle.disabled = false;
       }
     }
 
-    /* ---- wire events (async when possible, native form as fallback) ---- */
-    bindSubmit(connectBtn, doConnect);
-    bindSubmit(disconnectBtn, doDisconnect);
+    /* ---- wire events ---------------------------------------------------- */
+    if (connectBtn) { connectBtn.addEventListener('click', startConnect); }
+    if (disconnectBtn) { disconnectBtn.addEventListener('click', doDisconnect); }
     if (refreshBtn) { refreshBtn.addEventListener('click', function (e) { e.preventDefault(); loadStatus(true); }); }
     if (overlayToggle) { overlayToggle.addEventListener('click', function (e) { e.preventDefault(); toggleOverlay(); }); }
 
-    function bindSubmit(btn, handler) {
-      if (!btn) { return; }
-      // The connect/disconnect controls are <button type="button"> (no enclosing
-      // form), so bind the action to the button's click — doConnect/doDisconnect
-      // call preventDefault themselves. Binding to a form's submit never fired.
-      btn.addEventListener('click', handler);
-    }
-
     /* ---- boot ---------------------------------------------------------- */
     applyStatus({ status: initialStatus, lastNotice: initialNotice, lastError: initialError });
+    setConnectLabel(LABEL_CONNECT);
+
+    if (returnCode && returnState && connectEndpoint) {
+      // Back from site-check.de: connect on our own, the customer already said yes there.
+      cleanUrl();
+      exchange({ pairingCode: returnCode, state: returnState });
+      return;
+    }
+    if (legacyCode) { cleanUrl(); }
     loadStatus(false);
     loadWebappStatus();
   }
+  // Boot last: initPanel reads the constants above, which a `var` only holds
+  // once its line has run (calling it from the top threw before the click
+  // handlers were wired, so „Mit site-check verbinden“ did nothing).
+  global.ScConnector = { initPanel: initPanel };
+  var panels = document.querySelectorAll('[data-sc-panel]');
+  for (var i = 0; i < panels.length; i++) { initPanel(panels[i]); }
 })(typeof globalThis !== 'undefined' ? globalThis : window);

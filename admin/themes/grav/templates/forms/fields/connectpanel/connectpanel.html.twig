@@ -1,6 +1,6 @@
 {% extends "forms/field.html.twig" %}
 
-{# Site-Check Connector — shared admin panel kit (Grav adapter).
+{# site-check Connector — shared admin panel kit (Grav adapter).
    Design + behaviour live in sc-connector.css / sc-connector.js (this dir),
    kept in sync with .plugin/_shared/connector-ui/. The PHP injects both files
    inline via buildAdminConnectPanelState() so the panel stays self-contained. #}
@@ -14,6 +14,10 @@
 {% set scStatus = connect.status|default('not_connected') %}
 {% set scState = scStatus == 'connected' ? 'connected' : (scStatus == 'error' ? 'interrupted' : 'disconnected') %}
 {% set scBase = resolvedWebappBaseUrl|trim('/') %}
+{# Same lead texts as the kit's VIEW map; empty while not connected (the kit fills/hides it). #}
+{% set scHeroLead = scStatus == 'connected' ? 'Geprüfte Fixes und das Assistenz-Widget werden ausgeliefert.' : (scStatus == 'error' ? 'Aktuell werden keine Fixes ausgeliefert.' : '') %}
+{# P-03: „Zu site-check“ leads to this website's dashboard once its id is known. #}
+{% set scDashboardHref = connect.websiteId|default('') ? scBase ~ '/app/websites/' ~ (connect.websiteId|url_encode) ~ '?verbunden=1' : scBase ~ '/app' %}
 
 {% block field %}
   <div class="form-field">
@@ -23,6 +27,7 @@
       data-initial-notice="{{ connect.lastNotice|default('')|e('html_attr') }}"
       data-initial-error="{{ connect.lastError|default('')|e('html_attr') }}"
       data-connect-endpoint="{{ connect.adminConnectEndpoint|default('')|e('html_attr') }}"
+      data-connect-start-endpoint="{{ connect.adminConnectStartEndpoint|default('')|e('html_attr') }}"
       data-disconnect-endpoint="{{ connect.adminDisconnectEndpoint|default('')|e('html_attr') }}"
       data-status-endpoint="{{ connect.adminStatusEndpoint|default('')|e('html_attr') }}"
       data-overlay-endpoint="{{ connect.adminOverlayEndpoint|default('')|e('html_attr') }}"
@@ -46,15 +51,13 @@
           <div class="scc-hero__top">
             <div>
               <h1 class="scc-h1 scc-hero__title">Accessibility Connector</h1>
-              <p class="scc-hero__lead" data-sc-hero-lead>Site-Check wendet geprüfte Barrierefreiheits-Fixes automatisch an. Verbinde die Website mit deinem Site-Check-Konto, um loszulegen.</p>
+              <p class="scc-hero__lead" data-sc-hero-lead{{ scHeroLead ? '' : ' hidden' }}>{{ scHeroLead }}</p>
             </div>
             <div class="scc-signal" data-sc-signal data-tone="neutral" role="status" aria-live="polite">
               <span class="scc-signal__label" data-sc-signal-label>Nicht verbunden</span>
               <span class="scc-lampwrap" aria-hidden="true"><span class="scc-lamp"></span></span>
             </div>
           </div>
-
-          <p class="scc-newhint"><strong>Neu bei Site-Check?</strong> Barrierefreiheit prüfen und Fixes automatisch anwenden — <a href="{{ scBase }}/register" target="_blank" rel="noreferrer noopener">jetzt registrieren&nbsp;↗</a>.</p>
 
           <div class="scc-hero__manage">
             <button type="button" class="scc-btn scc-btn--secondary scc-btn--sm" data-sc-refresh>Status aktualisieren</button>
@@ -66,15 +69,17 @@
       {# Verbinden #}
       <div class="scc-connect">
         <section class="scc-card">
-          <h2 class="scc-h2 scc-card__t" data-sc-connect-title>Diese Website mit Site-Check verbinden</h2>
-          <p class="scc-card__c">Füge den Verbindungscode aus deiner Site-Check-Webapp ein und klicke auf <strong>Jetzt verbinden</strong>. Den Code bekommst du im Verbindungs-Assistenten der Webapp.</p>
-          <label class="scc-label" for="sc-acc-pairing-code">Verbindungscode</label>
-          <div class="scc-connect-row">
-            <input class="scc-input" id="sc-acc-pairing-code" name="pairingCode" type="text" placeholder="Code aus der Webapp einfügen" autocomplete="off" spellcheck="false" data-sc-code aria-describedby="sc-acc-code-fb">
-            <button type="button" class="scc-btn scc-btn--accent scc-btn--connect" data-sc-connect>Jetzt verbinden</button>
-          </div>
-          <div class="scc-fb" id="sc-acc-code-fb" data-sc-code-fb aria-live="polite"></div>
-          <div class="scc-note" data-sc-note></div>
+          <h2 class="scc-h2 scc-card__t">site-check</h2>
+          <p class="scc-card__c" data-sc-connect-lead>Verbinde diese Website mit site-check, damit Barrierefreiheits-Fehler automatisch behoben werden.</p>
+          <button type="button" class="scc-btn scc-btn--accent scc-btn--connect" data-sc-connect>Mit site-check verbinden</button>
+          <div class="scc-note" data-sc-note role="status" aria-live="polite"></div>
+        </section>
+      </div>
+
+      <div class="scc-done">
+        <section class="scc-card">
+          <h2 class="scc-h2 scc-card__t">Verbunden ✓</h2>
+          <a class="scc-btn scc-btn--accent" href="{{ scDashboardHref|e('html_attr') }}" target="_blank" rel="noopener" data-sc-dashboard-link>Zu site-check</a>
         </section>
       </div>
 
@@ -83,8 +88,8 @@
         <h2 class="scc-h2 scc-settings__t">Einstellungen</h2>
         <p class="scc-settings__c">Technische Grundeinstellungen des Connectors.</p>
         <div class="scc-row">
-          <div><h3 class="scc-h3 scc-row__t">Assistenz-Overlay erlauben</h3><div class="scc-row__x">Erlaubt der Webapp, das Site-Check-Bedienhilfen-Overlay für Besucher*innen einzublenden.</div></div>
-          <button type="button" class="scc-toggle" data-sc-overlay-toggle aria-pressed="{{ connect.overlayRuntimeEnabled|default(true) ? 'true' : 'false' }}" aria-label="Assistenz-Overlay erlauben"></button>
+          <div><h3 class="scc-h3 scc-row__t">Assistenz-Widget erlauben</h3><div class="scc-row__x">Erlaubt der Webapp, das site-check-Assistenz-Widget für Besucher*innen einzublenden.</div></div>
+          <button type="button" class="scc-toggle" data-sc-overlay-toggle aria-pressed="{{ connect.overlayRuntimeEnabled|default(true) ? 'true' : 'false' }}" aria-label="Assistenz-Widget erlauben"></button>
         </div>
       </section>
 

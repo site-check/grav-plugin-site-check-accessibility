@@ -141,6 +141,18 @@ $r = $engine->applyDocumentOverrides(
 );
 check('doc: title created in head when missing', contains($r['html'], '<title>Made</title>'));
 
+// 14b. FA-136 (test lab 1.3.1): the title of the page is the one in head, never the <title> of an inline SVG.
+$r = $engine->applyDocumentOverrides(
+    '<html><head><meta charset="utf-8"></head><body><svg viewBox="0 0 10 10"><title>Logo</title></svg><p>x</p></body></html>',
+    [['documentTarget' => 'title', 'value' => 'Startseite']]
+);
+check('doc: svg title untouched, page title created in head', contains($r['html'], '<title>Logo</title>') && preg_match('#<head>.*<title>Startseite</title>.*</head>#s', $r['html']) === 1);
+$r = $engine->applyDocumentOverrides(
+    '<html><head><title>alt</title></head><body><svg><title>Logo</title></svg></body></html>',
+    [['documentTarget' => 'title', 'value' => 'Neu']]
+);
+check('doc: head title replaced, svg title kept', contains($r['html'], '<title>Neu</title>') && contains($r['html'], '<title>Logo</title>') && !contains($r['html'], '>alt<'));
+
 // 15. document_override: set lang on <html>.
 $r = $engine->applyDocumentOverrides(
     '<html><head><title>t</title></head><body>x</body></html>',
@@ -296,6 +308,69 @@ $src6 = '<html><body><p class="x">• Milch • Eier</p></body></html>';
 $r = $engine->applyElementReplace($src6, [['selector' => 'p.x', 'html' => '<ul><li>Milch</li><li>Eier</li></ul>']]);
 check('element_replace: anchor match -> applied', contains($r['html'], '<ul data-sc-acc-element-replaced="1"><li>Milch</li>') && count($r['unappliedOps']) === 0);
 
+// 22f. FA-143 (test lab 1.3.1): element_remove is two-phase. Two positional removes under
+// the same siblings both resolve against the unmutated DOM; after the first removal the
+// second must not slide onto the next paragraph.
+$r = $engine->applyElementRemove(
+    '<html><body><div id="c"><p>A</p><p>B</p><p>C</p><p>D</p></div></body></html>',
+    [['selector' => 'div#c > p:nth-of-type(1)'], ['selector' => 'div#c > p:nth-of-type(2)']]
+);
+check('FA-143 remove: two positional removes take exactly rows 1 and 2', !contains($r['html'], '<p>A</p>') && !contains($r['html'], '<p>B</p>') && contains($r['html'], '<p>C</p>') && contains($r['html'], '<p>D</p>'));
+check('FA-143 remove: nothing reported unapplied', $r['unappliedOps'] === []);
+
+// 22g. FA-143: one element matched by two remove ops is removed once; the second op is
+// handled, not handed to the client fallback (which would hit the next sibling).
+$r = $engine->applyElementRemove(
+    '<html><body><div id="c"><p>A</p><p>B</p></div></body></html>',
+    [['selector' => 'div#c > p:nth-of-type(1)'], ['selector' => '#c > p:nth-of-type(1)']]
+);
+check('FA-143 remove: shared target removed once, B kept, nothing unapplied', !contains($r['html'], '<p>A</p>') && contains($r['html'], '<p>B</p>') && $r['unappliedOps'] === []);
+
+// 22h. FA-143: pseudo-list as the product sends it — the list replaces the LAST row, the
+// earlier rows go from the back, all by p:nth-of-type(n). The paragraph after stays.
+$pseudoList = '<html><body><div id="c"><p>Milch</p><p>Eier</p><p>Brot</p><p>Kontaktformular</p></div></body></html>';
+$listHtml = '<ul><li>Milch</li><li>Eier</li><li>Brot</li></ul>';
+$r = $engine->applyElementReplaceAndRemove(
+    $pseudoList,
+    [['selector' => 'div#c > p:nth-of-type(3)', 'html' => $listHtml]],
+    [['selector' => 'div#c > p:nth-of-type(2)'], ['selector' => 'div#c > p:nth-of-type(1)']]
+);
+check('FA-143 combined (last row): list in place of the rows', contains($r['html'], '<div id="c"><ul data-sc-acc-element-replaced="1"><li>Milch</li><li>Eier</li><li>Brot</li></ul><p>Kontaktformular</p></div>'));
+check('FA-143 combined (last row): no row paragraph left', !contains($r['html'], '<p>Milch</p>') && !contains($r['html'], '<p>Eier</p>') && !contains($r['html'], '<p>Brot</p>'));
+check('FA-143 combined (last row): following paragraph kept', contains($r['html'], '<p>Kontaktformular</p>'));
+check('FA-143 combined (last row): nothing unapplied', $r['unappliedReplaceOps'] === [] && $r['unappliedRemoveOps'] === []);
+
+// 22i. FA-143: the case the product avoids today — the list replaces the FIRST row and the
+// following rows are removed in forward order. Only the two-phase pass gets this right.
+$r = $engine->applyElementReplaceAndRemove(
+    '<html><body><div><p>Milch</p><p>Eier</p><p>Brot</p><p>Kontaktformular</p></div></body></html>',
+    [['selector' => 'div > p:nth-of-type(1)', 'html' => $listHtml]],
+    [['selector' => 'div > p:nth-of-type(2)'], ['selector' => 'div > p:nth-of-type(3)']]
+);
+check('FA-143 combined (first row): exactly the three rows replaced/removed, fourth paragraph kept', contains($r['html'], '<div><ul data-sc-acc-element-replaced="1"><li>Milch</li><li>Eier</li><li>Brot</li></ul><p>Kontaktformular</p></div>'));
+check('FA-143 combined (first row): nothing unapplied', $r['unappliedReplaceOps'] === [] && $r['unappliedRemoveOps'] === []);
+
+// 22j. FA-143: a remove addressed at the replace target leaves it to the replace (content
+// kept as the list) and is not reported unapplied; an unmatched remove is.
+$r = $engine->applyElementReplaceAndRemove(
+    $pseudoList,
+    [['selector' => 'div#c > p:nth-of-type(3)', 'html' => $listHtml]],
+    [['selector' => 'div#c > p:nth-of-type(3)'], ['selector' => 'aside.gone']]
+);
+check('FA-143 combined: replace wins over a remove on the same node', contains($r['html'], '<ul data-sc-acc-element-replaced="1">') && contains($r['html'], '<p>Eier</p>'));
+check('FA-143 combined: only the unmatched remove carried for fallback', $r['unappliedReplaceOps'] === [] && count($r['unappliedRemoveOps']) === 1 && ($r['unappliedRemoveOps'][0]['selector'] ?? '') === 'aside.gone');
+
+// 22k. FA-143: nothing applied -> html verbatim, each unmatched op back in its own list.
+$src7 = '<html><body><span>a</span></body></html>';
+$r = $engine->applyElementReplaceAndRemove(
+    $src7,
+    [['selector' => 'p.gone', 'html' => '<ul><li>x</li></ul>']],
+    [['selector' => 'div.nope']]
+);
+check('FA-143 combined: no match -> verbatim, ops split by family', $r['html'] === $src7 && count($r['unappliedReplaceOps']) === 1 && ($r['unappliedReplaceOps'][0]['selector'] ?? '') === 'p.gone' && count($r['unappliedRemoveOps']) === 1 && ($r['unappliedRemoveOps'][0]['selector'] ?? '') === 'div.nope');
+$r = $engine->applyElementReplaceAndRemove($src7, [], []);
+check('FA-143 combined: no ops -> verbatim, nothing unapplied', $r['html'] === $src7 && $r['unappliedReplaceOps'] === [] && $r['unappliedRemoveOps'] === []);
+
 // --- Resource-scoped alt (imageKey, no selector) ---
 
 // 23. resource-alt: alt set on the <img> whose src matches; others untouched.
@@ -389,6 +464,154 @@ $r = $engine->applyLabelAppend(
     [['selector' => 'input.amb', 'text' => ' *']]
 );
 check('label_append: ambiguous sibling labels -> unapplied', count($r['unappliedOps']) === 1);
+
+
+// 25. media_track: captions + descriptions on a server-rendered <video>.
+$r = $engine->applyMediaTracks(
+    '<html><body><main><video id="film" src="/media/film.mp4" controls>No video support.</video></main></body></html>',
+    [
+        ['selector' => '#film', 'trackKind' => 'captions', 'language' => 'de', 'label' => 'Deutsch',
+            'src' => '/plugin/sw-acc-connector/media-track?file=a1/captions-de-v1.vtt', 'id' => 'trk-cap'],
+        ['selector' => '#film', 'trackKind' => 'descriptions', 'language' => 'de', 'label' => 'Audiodeskription',
+            'src' => '/plugin/sw-acc-connector/media-track?file=a1/descriptions-de-v1.vtt', 'id' => 'trk-desc'],
+    ]
+);
+$mediaHtml = $r['html'];
+check('media_track: both tracks added once', substr_count($mediaHtml, 'kind="captions"') === 1 && substr_count($mediaHtml, 'kind="descriptions"') === 1);
+check('media_track: media element marked for the player runtime', contains($mediaHtml, 'data-sc-media'));
+check(
+    'media_track: captions default on',
+    (bool) preg_match('/kind="captions"[^>]*default/', $mediaHtml) || (bool) preg_match('/default[^>]*kind="captions"/', $mediaHtml)
+);
+check(
+    'media_track: descriptions not default (no unrequested audio description)',
+    !preg_match('/kind="descriptions"[^>]*default/', $mediaHtml) && !preg_match('/default[^>]*kind="descriptions"/', $mediaHtml)
+);
+check('media_track: fallback text stays behind the tracks', strpos($mediaHtml, 'No video support') > strpos($mediaHtml, 'kind="descriptions"'));
+check('media_track: report has nothing unapplied', $r['unappliedOps'] === []);
+
+// 25b. idempotent via data-sc-track-id: a second pass must not duplicate.
+$r = $engine->applyMediaTracks($mediaHtml, [
+    ['selector' => '#film', 'trackKind' => 'captions', 'language' => 'de', 'label' => 'Deutsch',
+        'src' => '/plugin/sw-acc-connector/media-track?file=a1/captions-de-v1.vtt', 'id' => 'trk-cap'],
+]);
+check('media_track: second pass adds nothing', substr_count($r['html'], 'kind="captions"') === 1);
+
+// 25c. <source> children: a track is only valid after them, before the fallback.
+$r = $engine->applyMediaTracks(
+    '<html><body><video controls><source src="/a.webm" type="video/webm"><source src="/a.mp4" type="video/mp4">No video.</video></body></html>',
+    [['selector' => 'video:nth-of-type(1)', 'trackKind' => 'captions', 'language' => 'de', 'label' => 'Deutsch', 'src' => '/x.vtt', 'id' => 'trk-src']]
+);
+check('media_track: track placed behind the source elements', strpos($r['html'], '<track') > strpos($r['html'], '/a.mp4'));
+check('media_track: fallback text stays last', strpos($r['html'], 'No video.') > strpos($r['html'], '<track'));
+
+// 25d. wrong target: a <track> inside a <div> has no effect, so report it instead of pretending.
+$r = $engine->applyMediaTracks(
+    '<html><body><div id="not-media"></div></body></html>',
+    [['selector' => '#not-media', 'trackKind' => 'captions', 'language' => 'de', 'label' => 'Deutsch', 'src' => '/x.vtt', 'id' => 'trk-div']]
+);
+check('media_track: non-media element gets no track', !contains($r['html'], '<track'));
+check('media_track: non-media element reported unapplied', count($r['unappliedOps']) === 1);
+
+// 25e. selector matches nothing -> reported, html untouched.
+$r = $engine->applyMediaTracks(
+    '<html><body><video id="film" src="/a.mp4"></video></body></html>',
+    [['selector' => '#gone', 'trackKind' => 'captions', 'language' => 'de', 'label' => 'Deutsch', 'src' => '/x.vtt', 'id' => 'trk-gone']]
+);
+check('media_track: missing target reported unapplied', count($r['unappliedOps']) === 1 && !contains($r['html'], '<track'));
+
+// 25f. author already ships a default track -> do not add a second default.
+$r = $engine->applyMediaTracks(
+    '<html><body><video id="v" src="/a.mp4"><track kind="captions" src="/own.vtt" srclang="de" default></video></body></html>',
+    [['selector' => '#v', 'trackKind' => 'captions', 'language' => 'en', 'label' => 'Englisch', 'src' => '/en.vtt', 'id' => 'trk-en']]
+);
+check('media_track: existing default track keeps precedence', substr_count($r['html'], 'default') === 1);
+
+// 25g. audio elements take tracks too.
+$r = $engine->applyMediaTracks(
+    '<html><body><audio id="pod" src="/p.mp3" controls></audio></body></html>',
+    [['selector' => '#pod', 'trackKind' => 'captions', 'language' => 'de', 'label' => 'Deutsch', 'src' => '/p.vtt', 'id' => 'trk-audio']]
+);
+check('media_track: audio element gets a track', contains($r['html'], 'kind="captions"'));
+// 26. element_wrap (FA-138, 1.3.0): menu of three links with " | " separators, each link in
+// its own listitem span, the separators in the span of the preceding link.
+$menu = '<html><body><nav id="m"><a href="/a" id="a1">Alpha</a> | <a href="/b" id="a2">Beta</a> | <a href="/c" id="a3">Gamma</a></nav><p>Nach</p></body></html>';
+$menuOp = [
+    'selector' => 'nav > a:nth-of-type(1)',
+    'itemSelectors' => ['nav > a:nth-of-type(1)', 'nav > a:nth-of-type(2)', 'nav > a:nth-of-type(3)'],
+    'itemWrapTag' => 'span',
+];
+$r = $engine->applyElementWrap($menu, [$menuOp]);
+$wrapped = $r['html'];
+$wrapperOpen = '<div role="list" style="display:contents" data-sc-acc-wrapped="1">';
+$itemOpen = '<span role="listitem" style="display:contents" data-sc-acc-wrapped="1">';
+check('element_wrap: one list wrapper directly in the nav', substr_count($wrapped, 'role="list"') === 1 && contains($wrapped, '<nav id="m">' . $wrapperOpen));
+check('element_wrap: three listitem spans', substr_count($wrapped, $itemOpen) === 3);
+check(
+    'element_wrap: separators sit in the span of the preceding link',
+    contains($wrapped, $itemOpen . '<a href="/a" id="a1">Alpha</a> | </span>')
+    && contains($wrapped, $itemOpen . '<a href="/b" id="a2">Beta</a> | </span>')
+    && contains($wrapped, $itemOpen . '<a href="/c" id="a3">Gamma</a></span></div></nav>')
+);
+check('element_wrap: text and order unchanged', trim(strip_tags($wrapped)) === trim(strip_tags($menu)));
+check('element_wrap: links keep their attributes, no role on them', !preg_match('/<a [^>]*role=/', $wrapped));
+check('element_wrap: nodes after the last entry stay outside', contains($wrapped, '</nav><p>Nach</p>'));
+check('element_wrap: nothing unapplied', $r['unappliedOps'] === []);
+
+// 26b. li directly in a nav: the li take role=listitem themselves, whitespace stays in place.
+$liNav = "<html><body><nav>\n<li>Eins</li>\n<li>Zwei</li>\n<li>Drei</li>\n</nav></body></html>";
+$r = $engine->applyElementWrap($liNav, [[
+    'selector' => 'nav > li:nth-of-type(1)',
+    'itemSelectors' => ['nav > li:nth-of-type(1)', 'nav > li:nth-of-type(2)', 'nav > li:nth-of-type(3)'],
+    'itemWrapTag' => null,
+]]);
+check(
+    'element_wrap: li get role=listitem inside the wrapper',
+    contains($r['html'], "<nav>\n" . $wrapperOpen . "<li role=\"listitem\">Eins</li>\n<li role=\"listitem\">Zwei</li>\n<li role=\"listitem\">Drei</li></div>\n</nav>")
+);
+check('element_wrap: no item span without itemWrapTag', !contains($r['html'], '<span'));
+check('element_wrap: li variant nothing unapplied', $r['unappliedOps'] === []);
+
+// 26c. entries with different parents: not applied, html untouched.
+$split = '<html><body><div><p><a id="x">X</a></p><p><a id="y">Y</a></p></div></body></html>';
+$r = $engine->applyElementWrap($split, [['selector' => '#x', 'itemSelectors' => ['#x', '#y'], 'itemWrapTag' => 'span']]);
+check('element_wrap: different parents -> unapplied', count($r['unappliedOps']) === 1);
+check('element_wrap: different parents -> html untouched', $r['html'] === $split);
+
+// 26d. one selector without a match: not applied, nothing moves.
+$r = $engine->applyElementWrap($menu, [[
+    'selector' => 'nav > a:nth-of-type(1)',
+    'itemSelectors' => ['nav > a:nth-of-type(1)', 'nav > a:nth-of-type(4)'],
+    'itemWrapTag' => 'span',
+]]);
+check('element_wrap: selector without match -> unapplied', count($r['unappliedOps']) === 1);
+check('element_wrap: selector without match -> html untouched', $r['html'] === $menu);
+
+// 26e. one selector with several matches: not applied.
+$r = $engine->applyElementWrap($menu, [['selector' => '#a1', 'itemSelectors' => ['#a1', 'nav > a'], 'itemWrapTag' => 'span']]);
+check('element_wrap: ambiguous selector -> unapplied', count($r['unappliedOps']) === 1 && $r['html'] === $menu);
+
+// 26f. entries out of the reported order: not applied.
+$r = $engine->applyElementWrap($menu, [['selector' => '#a3', 'itemSelectors' => ['#a3', '#a1'], 'itemWrapTag' => 'span']]);
+check('element_wrap: entries out of order -> unapplied', count($r['unappliedOps']) === 1 && $r['html'] === $menu);
+
+// 26g. second pass over wrapped HTML: no second wrapper, whatever the selectors resolve to.
+$r = $engine->applyElementWrap($wrapped, [$menuOp]);
+check('element_wrap: second pass (positional) adds no wrapper', substr_count($r['html'], 'role="list"') === 1 && substr_count($r['html'], $itemOpen) === 3);
+$r = $engine->applyElementWrap($wrapped, [['selector' => '#a1', 'itemSelectors' => ['#a1', '#a2', '#a3'], 'itemWrapTag' => 'span']]);
+check('element_wrap: second pass (id selectors) is a no-op', $r['html'] === $wrapped && $r['unappliedOps'] === []);
+$r = $engine->applyElementWrap(
+    '<html><body><nav>' . $wrapperOpen . '<a id="k1">K1</a></div><a id="k2">K2</a><a id="k3">K3</a></nav></body></html>',
+    [['selector' => '#k2', 'itemSelectors' => ['#k2', '#k3'], 'itemWrapTag' => 'span']]
+);
+check('element_wrap: parent already holds a marked list -> no second one', substr_count($r['html'], 'role="list"') === 1 && $r['unappliedOps'] === []);
+
+// 26h. overlapping ops of one batch: the second one is dropped, never applied on moved nodes.
+$r = $engine->applyElementWrap($menu, [
+    ['selector' => '#a1', 'itemSelectors' => ['#a1', '#a2'], 'itemWrapTag' => 'span'],
+    ['selector' => '#a2', 'itemSelectors' => ['#a2', '#a3'], 'itemWrapTag' => 'span'],
+]);
+check('element_wrap: overlapping second op dropped', substr_count($r['html'], 'role="list"') === 1 && $r['unappliedOps'] === []);
 
 echo "\n" . str_repeat('=', 64) . "\n";
 if ($failures === 0) {

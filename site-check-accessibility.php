@@ -36,9 +36,16 @@ require_once __DIR__ . '/lib/ForwardedBaseUrl.php';
 // 1.0.4: whether a verified sync payload may become the cache (not stale, this site).
 require_once __DIR__ . '/lib/SignedCacheGuard.php';
 
+// 1.1.0: the trusted sync signing keys (current + rotation slot) and their ids.
+require_once __DIR__ . '/lib/SigningKeys.php';
+// Plugin-led connect (1.1.0): one-time state, start URL, presence.
+require_once __DIR__ . '/lib/ConnectHandshake.php';
+
 class SiteCheckAccessibilityPlugin extends Plugin
 {
-    private const PLUGIN_VERSION = '1.0.4';
+    private const PLUGIN_VERSION = '1.3.0';
+    // Which connector product line this plugin belongs to; reported by the healthcheck.
+    private const CONNECTOR_LINEAGE = 'site-check';
     // Block-level tags that receive a data-sw-block-id marker for
     // block-scoped structural fixes.
     private const STABLE_BLOCK_TAGS = ['p', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'td', 'figcaption', 'blockquote', 'dt', 'dd'];
@@ -53,6 +60,15 @@ class SiteCheckAccessibilityPlugin extends Plugin
     private const CONNECT_STATE_CONNECTED = 'connected';
     private const CONNECT_STATE_ERROR = 'error';
 
+    // Customer texts of the connect flow (approved wording, used verbatim).
+    // Technical details go to the Grav log only, never into `error`/`lastError`.
+    private const CONNECT_TEXT_STATE_EXPIRED = 'Das hat zu lange gedauert. Klicke noch einmal auf „Mit site-check verbinden“.';
+    private const CONNECT_TEXT_UNAVAILABLE = 'site-check antwortet gerade nicht. Versuch es gleich noch einmal.';
+    private const CONNECT_TEXT_FAILED = 'Das hat nicht geklappt.';
+    // C-04: marker in the plugin data dir; once written, the "installed" admin
+    // message is never shown again.
+    private const INSTALL_NOTICE_MARKER = 'install-notice-shown';
+
     // Ed25519 public key (base64 SPKI DER) matching the webapp-side
     // SYNC_SIGNING_PRIVATE_KEY. Generated together via
     // `npm run crypto:generate-signing-key`. An empty placeholder here
@@ -60,6 +76,9 @@ class SiteCheckAccessibilityPlugin extends Plugin
     // plugin will deliver NO overrides at all (overrides.json is gone).
     // Paste the printed key to enable delivery.
     private const SYNC_PUBLIC_KEY_B64 = 'MCowBQYDK2VwAyEAZwHEER1nwO7GLPVBd+egLQEHveO7z+J7ibAg3JIDfoc=';
+    // 1.1.0: slot for the next key during a signing-key rotation (same format).
+    // While empty, only the current key above is trusted.
+    private const SYNC_PUBLIC_KEY_NEXT_B64 = '';
 
     // Cache freshness + grace window. Cache older than STALE_SECONDS triggers
     // an async refresh. Grace > 24h without a successful pull forces
@@ -93,6 +112,15 @@ class SiteCheckAccessibilityPlugin extends Plugin
      * @var array<string, string>
      */
     private array $preflightHtmlCache = [];
+
+    /**
+     * 2.6.0 Medien: hat diese Anfrage eine Medienspur ins Markup gesetzt?
+     *
+     * Reicht das Ergebnis von injectMediaTracksIntoHtml an
+     * injectPlayerRuntimeBootstrap weiter, das unmittelbar danach läuft. Nur
+     * dann wird die Player-Runtime geladen.
+     */
+    private bool $mediaTracksAppliedOnPage = false;
 
     public static function getSubscribedEvents(): array
     {
@@ -239,6 +267,14 @@ class SiteCheckAccessibilityPlugin extends Plugin
             $this->handleSetImageMetaAltEndpoint();
         }
 
+        // 2.6.0 Medien: liefert eine abgelegte WebVTT-Spur aus. Oeffentlich
+        // und ohne Token, denn ein Untertitel einer oeffentlichen Seite ist
+        // kein Geheimnis. Der Umweg ueber diese Route ist noetig, weil das
+        // Datenverzeichnis ein Deny-All traegt.
+        if ($path === '/plugin/sw-acc-connector/media-track' && $method === 'GET') {
+            $this->handleMediaTrackEndpoint();
+        }
+
         if ($path === '/plugin/sw-acc-connector/sync-status' && $method === 'GET') {
             $this->handleSyncStatusEndpoint();
         }
@@ -251,8 +287,16 @@ class SiteCheckAccessibilityPlugin extends Plugin
             $this->handleSetOverlayEndpoint();
         }
 
+        if ($path === '/plugin/sw-acc-connector/connect-start' && $method === 'POST') {
+            $this->handleConnectStartEndpoint();
+        }
+
         if ($path === '/plugin/sw-acc-connector/connect' && $method === 'POST') {
             $this->handleConnectEndpoint();
+        }
+
+        if ($path === '/plugin/sw-acc-connector/presence' && $method === 'GET') {
+            $this->handlePresenceEndpoint();
         }
 
         if ($path === '/plugin/sw-acc-connector/disconnect' && $method === 'POST') {
@@ -462,15 +506,20 @@ class SiteCheckAccessibilityPlugin extends Plugin
                 'element-insert',
                 'element-insert-label',
                 'element-reorder',
+                // 1.3.0 (FA-138): invisible list wrapper around menu links / li in a nav.
+                'element-wrap',
                 'label-append',
                 'text-content',
                 'document-override',
                 'contrast-adjustment',
                 'css-declaration-set',
                 'overlay-config',
+                'media-track',
                 'page-inventory',
                 'server-side-apply',
             ],
+            'connectorLineage' => self::CONNECTOR_LINEAGE,
+            'trustedSigningKeyIds' => \Grav\Plugin\SiteCheckAccessibility\SigningKeys::ids($this->getTrustedSigningKeys()),
             'status' => [
                 'connectState' => (string) ($connection['status'] ?? self::CONNECT_STATE_NOT_CONNECTED),
                 'lastRegisterAt' => $state['lastRegisterAt'] ?? null,
@@ -588,6 +637,60 @@ class SiteCheckAccessibilityPlugin extends Plugin
         $paths = $event['paths'];
         $paths[] = __DIR__ . '/admin/themes/grav/templates';
         $event['paths'] = $paths;
+
+        // Fires on every classic-admin request that sets up Twig, before the
+        // page (and its message box) renders.
+        $this->maybeShowInstallNotice();
+    }
+
+    /**
+     * C-04: after installation the classic admin shows once „site-check ist
+     * installiert.“ with a link to this plugin's page. Only for a logged-in
+     * admin, never once connected; a marker in the plugin data dir keeps it to
+     * one time (also written when the notice is skipped because the site is
+     * connected or the admin already is on the plugin page).
+     *
+     * Grav 1.7 classic admin only: admin2 (Grav 2) has no message box fed by
+     * the messages service, and does not fire onAdminTwigTemplatePaths.
+     */
+    private function maybeShowInstallNotice(): void
+    {
+        try {
+            if (!$this->isAdmin() || !$this->isPluginEnabled() || !isset($this->grav['user'])) {
+                return;
+            }
+            $user = $this->grav['user'];
+            if (!$user->authenticated || !$user->authorize('admin.login')) {
+                return;
+            }
+
+            $marker = $this->getDataDir() . '/' . self::INSTALL_NOTICE_MARKER;
+            if (is_file($marker)) {
+                return;
+            }
+            @file_put_contents($marker, gmdate('c'));
+
+            $state = $this->readConnectionState();
+            if (($state['status'] ?? '') === self::CONNECT_STATE_CONNECTED || $this->getStoredApiToken() !== '') {
+                return;
+            }
+
+            $pluginPath = $this->getOwnAdminPath();
+            $currentPath = '/' . trim((string) $this->grav['uri']->path(), '/');
+            if (substr($currentPath, -strlen($pluginPath)) === $pluginPath) {
+                return;
+            }
+
+            // The admin message box prints messages raw, so every part is escaped here.
+            $href = rtrim((string) $this->grav['uri']->rootUrl(false), '/') . $pluginPath;
+            $message = htmlspecialchars('site-check ist installiert.', ENT_QUOTES, 'UTF-8')
+                . ' <a class="button button-small" href="' . htmlspecialchars($href, ENT_QUOTES, 'UTF-8') . '">'
+                . htmlspecialchars('Jetzt verbinden', ENT_QUOTES, 'UTF-8') . '</a>';
+
+            $this->grav['admin']->setMessage($message, 'info');
+        } catch (\Throwable $e) {
+            // A notice must never break the admin.
+        }
     }
 
     public function onOutputGenerated(): void
@@ -680,11 +783,14 @@ class SiteCheckAccessibilityPlugin extends Plugin
         $output = $this->injectSiblingInsertBootstrap($output, $currentPageUrl, $overrides);
         $output = $this->injectDocumentOverridesBootstrap($output, $currentPageUrl, $overrides);
         // 2.2.0 info-and-relationships runtime mutations. Order: tag_replace
-        // first (structural), then element_replace (subtree swap), then
-        // element_remove (subtraction). Each is idempotent via its own marker.
+        // first (structural), then element_replace (subtree swap) together with
+        // element_remove (subtraction): FA-143 resolves both against the same
+        // unmutated document. Each is idempotent via its own marker.
         $output = $this->injectTagReplaceBootstrap($output, $currentPageUrl, $overrides);
-        $output = $this->injectElementReplaceBootstrap($output, $currentPageUrl, $overrides);
-        $output = $this->injectElementRemoveBootstrap($output, $currentPageUrl, $overrides);
+        $output = $this->injectElementReplaceAndRemoveBootstraps($output, $currentPageUrl, $overrides);
+        // 1.3.0 (FA-138): element_wrap after replace/remove, so a list rebuilt by
+        // element_replace is already in place when the menu entries are wrapped.
+        $output = $this->injectElementWrapBootstrap($output, $currentPageUrl, $overrides);
         // 1.4.0 WCAG-Phase-0 fix types — inject the client <script> bootstraps
         // (fallback for DOM the target site's own JavaScript creates after
         // delivery; static markup is handled by the server-side pass where
@@ -700,6 +806,12 @@ class SiteCheckAccessibilityPlugin extends Plugin
         $output = $this->injectLabelAppendBootstrap($output, $currentPageUrl, $overrides);
         $output = $this->injectScHelperStyles($output, $overrides);
 
+        // 2.6.0 Medien: track-Elemente serverseitig setzen, dann die
+        // Player-Runtime laden. Reihenfolge zaehlt: die Runtime prueft auf
+        // data-sc-media, und das Attribut setzt der Mutator.
+        $output = $this->injectMediaTracksIntoHtml($output, $currentPageUrl, $overrides);
+        $output = $this->injectPlayerRuntimeBootstrap($output);
+
         $output = $this->injectOverlayRuntimeBootstrap($output);
 
         return $output;
@@ -710,7 +822,7 @@ class SiteCheckAccessibilityPlugin extends Plugin
      *
      * Returns:
      *   null    → NO overrides may be delivered. Covers:
-     *             - signed-delivery not configured (SYNC_PUBLIC_KEY_B64 empty)
+     *             - signed-delivery not configured (no trusted signing key)
      *             - pre-bootstrap (no cache written yet, grace not yet applicable)
      *             - grace expired (webapp silent > 24h → fail-closed)
      *   [items] → cache is valid, signature verified, validUntil OK and
@@ -723,7 +835,7 @@ class SiteCheckAccessibilityPlugin extends Plugin
      */
     private function resolveCachedOverrides(): ?array
     {
-        if (trim(self::SYNC_PUBLIC_KEY_B64) === '') {
+        if ($this->getTrustedSigningKeys() === []) {
             return null;
         }
 
@@ -867,6 +979,18 @@ class SiteCheckAccessibilityPlugin extends Plugin
                     $insertPosition = $this->normalizeElementInsertPosition($item['position'] ?? null);
                     $item['position'] = $insertPosition;
                     $id = $this->buildSelectorOverrideId($scope, $itemPageKey, $selector, 'element_insert:' . $insertPosition . ':' . sha1($insertHtml));
+                } elseif ($type === 'media_track' && $selector !== '') {
+                    // 2.6.0 Medien: Untertitel- oder Beschreibungsspur. Traegt
+                    // keinen `attribute`-Wert, braucht also einen eigenen Zweig,
+                    // sonst faellt das Item in den Catch-all unten und
+                    // verschwindet stillschweigend.
+                    $trackKind = (string) ($item['trackKind'] ?? '');
+                    $trackFile = trim((string) ($item['fileName'] ?? ''));
+                    if ($trackKind !== 'captions' && $trackKind !== 'descriptions') continue;
+                    if (!$this->isSafeMediaTrackName($trackFile)) continue;
+                    $vttCheck = $this->validateVttContent((string) ($item['content'] ?? ''));
+                    if ($vttCheck['ok'] !== true) continue;
+                    $id = sha1($itemPageKey . '|media_track|' . $selector . '|' . $trackFile);
                 } elseif ($type === 'element_reorder') {
                     // 2.1.0 WCAG-Phase-2: reorder a parent's direct children. Carries
                     // parentSelector + orderedChildSelectors (>=2), no `attribute`
@@ -878,6 +1002,16 @@ class SiteCheckAccessibilityPlugin extends Plugin
                     $item['parentSelector'] = $parentSelector;
                     $item['orderedChildSelectors'] = $childSelectors;
                     $id = $this->buildSelectorOverrideId($scope, $itemPageKey, $parentSelector, 'element_reorder:' . sha1(implode('>', $childSelectors)));
+                } elseif ($type === 'element_wrap') {
+                    // 1.3.0 (FA-138): carries itemSelectors + itemWrapTag, no
+                    // `attribute` — own branch, or the catch-all below drops it.
+                    // A formally broken item is skipped here, never the envelope.
+                    $wrap = $this->normalizeElementWrapPayload($item);
+                    if ($wrap['ok'] !== true) continue;
+                    $item['selector'] = $wrap['itemSelectors'][0];
+                    $item['itemSelectors'] = $wrap['itemSelectors'];
+                    $item['itemWrapTag'] = $wrap['itemWrapTag'];
+                    $id = $this->buildElementWrapId($scope, $itemPageKey, $wrap['itemSelectors'], $wrap['itemWrapTag']);
                 } elseif ($type === 'text_content_override' && $selector !== '') {
                     // 2.3.2: text_content_override has selector + value but no
                     // `attribute` field — the bootstrap branches on item.operation,
@@ -1031,6 +1165,9 @@ class SiteCheckAccessibilityPlugin extends Plugin
             } elseif ($type === 'element_reorder') {
                 // 2.1.0 WCAG-Phase-2: reorder a parent's direct children (V0).
                 $result = $this->upsertElementReorder($fix);
+            } elseif ($type === 'element_wrap') {
+                // 1.3.0 (FA-138): invisible list wrapper (V0).
+                $result = $this->upsertElementWrap($fix);
             } elseif ($type === '' || $type === 'alt_text_override') {
                 // Legacy alt payloads may arrive without an explicit type.
                 $result = $this->upsertAltOverride($fix);
@@ -1187,7 +1324,7 @@ class SiteCheckAccessibilityPlugin extends Plugin
         if (!$this->writeOverlayRuntimeConfig($overlayConfig)) {
             $this->sendJson([
                 'success' => false,
-                'error' => 'Overlay-Konfiguration konnte nicht geschrieben werden',
+                'error' => 'Widget-Konfiguration konnte nicht geschrieben werden',
             ], 500);
         }
 
@@ -1204,7 +1341,7 @@ class SiteCheckAccessibilityPlugin extends Plugin
         ]);
     }
 
-    // Admin panel overlay toggle — flips the local "Assistenz-Overlay erlauben"
+    // Admin panel overlay toggle — flips the local "Assistenz-Widget erlauben"
     // kill-switch (plugins.site-check-accessibility.overlay_runtime_enabled).
     // Same-origin admin fetch, no bearer token (mirrors connect/disconnect).
     private function handleSetOverlayEndpoint(): void
@@ -1218,7 +1355,7 @@ class SiteCheckAccessibilityPlugin extends Plugin
         if (!$this->persistOverlayRuntimeEnabled($enabled)) {
             $this->sendJson([
                 'success' => false,
-                'error' => 'Overlay-Einstellung konnte nicht gespeichert werden',
+                'error' => 'Widget-Einstellung konnte nicht gespeichert werden',
             ], 500);
         }
 
@@ -1303,6 +1440,89 @@ class SiteCheckAccessibilityPlugin extends Plugin
             || str_contains($message, 'failed to open stream');
     }
 
+    /**
+     * „Mit site-check verbinden“ (1.1.0): the URL to site-check.de with a fresh
+     * one-time state. Admin panel only; site-check sends the browser back to
+     * this plugin's page in the admin.
+     */
+    private function handleConnectStartEndpoint(): void
+    {
+        $this->assertPluginEnabled();
+        $this->assertAdminSecret();
+
+        $site = rtrim((string) $this->grav['uri']->rootUrl(true), '/');
+        $webappBaseUrl = $this->getWebappBaseUrl();
+        if ($site === '' || $webappBaseUrl === '') {
+            $this->logConnectProblem('connect-start: plugin base URL or webapp base URL could not be determined');
+            $this->sendJson(['success' => false, 'error' => self::CONNECT_TEXT_FAILED], 500);
+        }
+
+        $this->sendJson([
+            'success' => true,
+            'url' => \Grav\Plugin\SiteCheckAccessibility\ConnectHandshake::buildConnectUrl(
+                $webappBaseUrl,
+                'grav',
+                $site,
+                $site . $this->getOwnAdminPath(),
+                $this->issueConnectState()
+            ),
+        ]);
+    }
+
+    /** Public: is the plugin here, and can it connect from the plugin (v2)? */
+    private function handlePresenceEndpoint(): void
+    {
+        $this->assertPluginEnabled();
+        $this->sendJson(\Grav\Plugin\SiteCheckAccessibility\ConnectHandshake::presence(self::PLUGIN_VERSION));
+    }
+
+    /**
+     * This plugin's page in whichever admin runs: the classic admin and admin2
+     * both serve /<route>/plugins/<slug>, and both keep the query string through
+     * their login.
+     */
+    private function getOwnAdminPath(): string
+    {
+        $admin2 = (bool) $this->config->get('plugins.admin2.enabled', false);
+        $route = $admin2
+            ? (string) $this->config->get('plugins.admin2.route', '/admin')
+            : (string) $this->config->get('plugins.admin.route', '/admin');
+        $route = '/' . trim($route !== '' ? $route : '/admin', '/');
+        return $route . '/plugins/site-check-accessibility';
+    }
+
+    private function getConnectStateFile(): string
+    {
+        return $this->getDataDir() . '/connect-state.json';
+    }
+
+    /** One-time state for the round trip through site-check.de; only its hash is stored. */
+    private function issueConnectState(): string
+    {
+        [$state, $record] = \Grav\Plugin\SiteCheckAccessibility\ConnectHandshake::issue(time());
+        @file_put_contents($this->getConnectStateFile(), (string) json_encode($record));
+        return $state;
+    }
+
+    /** True exactly once for the state we issued, within its lifetime. */
+    private function consumeConnectState(string $state): bool
+    {
+        $path = $this->getConnectStateFile();
+        $record = is_file($path) ? json_decode((string) @file_get_contents($path), true) : null;
+        if (!\Grav\Plugin\SiteCheckAccessibility\ConnectHandshake::matches($record, $state)) {
+            return false;
+        }
+        @unlink($path);
+        return \Grav\Plugin\SiteCheckAccessibility\ConnectHandshake::isFresh($record, time());
+    }
+
+    /**
+     * Pairing: exchanges {pairingCode} with the webapp. Callers: the panel after
+     * the round trip through site-check.de, with the state this plugin issued
+     * (checked and consumed here); the panel with a legacy ?pairingCode= link
+     * from an older webapp, on an explicit click (transition, removed in
+     * 1.2.0); the webapp itself with its bearer token.
+     */
     private function handleConnectEndpoint(): void
     {
         $this->assertPluginEnabled();
@@ -1312,24 +1532,25 @@ class SiteCheckAccessibilityPlugin extends Plugin
         $pairingCode = trim((string) ($payload['pairingCode'] ?? ''));
 
         if ($pairingCode === '') {
+            $this->logConnectProblem('connect: request without pairingCode');
             $this->sendJson([
                 'success' => false,
-                'error' => 'pairingCode fehlt',
+                'error' => self::CONNECT_TEXT_FAILED,
             ], 400);
+        }
+
+        // Consumed, expired or foreign state: the customer simply starts again.
+        $connectState = trim((string) ($payload['state'] ?? ''));
+        if ($connectState !== '' && !$this->consumeConnectState($connectState)) {
+            $this->sendJson([
+                'success' => false,
+                'error' => self::CONNECT_TEXT_STATE_EXPIRED,
+            ], 403);
         }
 
         $pluginBaseUrl = rtrim((string) $this->grav['uri']->rootUrl(true), '/');
         if ($pluginBaseUrl === '') {
-            $this->writeConnectionState([
-                'status' => self::CONNECT_STATE_ERROR,
-                'lastError' => 'Plugin-Basis-URL konnte nicht ermittelt werden',
-                'lastPairingAttemptAt' => gmdate('c'),
-            ]);
-
-            $this->sendJson([
-                'success' => false,
-                'error' => 'Plugin-Basis-URL konnte nicht ermittelt werden',
-            ], 500);
+            $this->failConnect(self::CONNECT_TEXT_FAILED, 500, [], 'connect: plugin base URL could not be determined');
         }
 
         $this->writeConnectionState([
@@ -1340,11 +1561,10 @@ class SiteCheckAccessibilityPlugin extends Plugin
             'lastError' => null,
         ]);
 
-        $exchangeResponse = null;
-        $exchangeBody = [];
-        $exchangeData = [];
-        $websiteId = '';
-        $apiToken = '';
+        $attempt = [
+            'pairingCode' => $pairingCode,
+            'pluginBaseUrl' => $pluginBaseUrl,
+        ];
 
         try {
             $exchangeResponse = $this->callWebappJson('/api/connectors/grav/pairing/exchange', [
@@ -1354,129 +1574,188 @@ class SiteCheckAccessibilityPlugin extends Plugin
                     'pluginBaseUrl' => $pluginBaseUrl,
                 ],
             ]);
-
-            $exchangeBody = $exchangeResponse['json'] ?? [];
-            $exchangeSuccess = ($exchangeBody['success'] ?? false) === true;
-            $exchangeData = is_array($exchangeBody['data'] ?? null) ? $exchangeBody['data'] : [];
-            $exchangeErrorMessage = (string) (($exchangeBody['error']['message'] ?? '') ?: ($exchangeBody['error'] ?? ''));
-
-            if (!$exchangeSuccess) {
-                $exchangeError = $this->explainBaseUrlMismatch(
-                    $exchangeErrorMessage !== '' ? $exchangeErrorMessage : 'Pairing-Austausch fehlgeschlagen',
-                    (int) ($exchangeResponse['status'] ?? 0),
-                    $pluginBaseUrl
-                );
-
-                $this->writeConnectionState([
-                    'status' => self::CONNECT_STATE_ERROR,
-                    'pairingCode' => $pairingCode,
-                    'pluginBaseUrl' => $pluginBaseUrl,
-                    'lastPairingAttemptAt' => gmdate('c'),
-                    'lastError' => $exchangeError,
-                ]);
-
-                $this->sendJson([
-                    'success' => false,
-                    'error' => $exchangeError,
-                ], $exchangeResponse['status'] ?? 502);
-            }
-
-            // The webapp's exchange response carries the connector credentials
-            // under `data.connection.*` (same shape as the WP/Joomla/TYPO3
-            // connectors read).
-            $connection = is_array($exchangeData['connection'] ?? null) ? $exchangeData['connection'] : [];
-            $websiteId = trim((string) ($connection['websiteId'] ?? ''));
-            $apiToken = trim((string) ($connection['apiToken'] ?? ''));
-
-            if ($websiteId === '' || $apiToken === '') {
-                $this->writeConnectionState([
-                    'status' => self::CONNECT_STATE_ERROR,
-                    'pairingCode' => $pairingCode,
-                    'pluginBaseUrl' => $pluginBaseUrl,
-                    'lastPairingAttemptAt' => gmdate('c'),
-                    'lastError' => 'Webapp hat keine vollständigen Connector-Zugangsdaten geliefert',
-                ]);
-
-                $this->sendJson([
-                    'success' => false,
-                    'error' => 'Webapp hat keine vollständigen Connector-Zugangsdaten geliefert',
-                ], 502);
-            }
-
-            if (!$this->writeStoredApiToken($apiToken)) {
-                $this->writeConnectionState([
-                    'status' => self::CONNECT_STATE_ERROR,
-                    'pairingCode' => $pairingCode,
-                    'pluginBaseUrl' => $pluginBaseUrl,
-                    'websiteId' => $websiteId,
-                    'lastPairingAttemptAt' => gmdate('c'),
-                    'lastError' => 'API-Token konnte lokal nicht gespeichert werden',
-                ]);
-
-                $this->sendJson([
-                    'success' => false,
-                    'error' => 'API-Token konnte lokal nicht gespeichert werden',
-                ], 500);
-            }
-
-            try {
-                $registerResponse = $this->callWebappJson('/api/connectors/grav/register', [
-                    'method' => 'POST',
-                    'headers' => ['Authorization: Bearer ' . $apiToken],
-                    'json' => [
-                        'websiteId' => $websiteId,
-                        'pluginBaseUrl' => $pluginBaseUrl,
-                    ],
-                ]);
-
-                $registerBody = $registerResponse['json'] ?? [];
-                $registerSuccess = ($registerBody['success'] ?? false) === true;
-                $registerErrorMessage = (string) (($registerBody['error']['message'] ?? '') ?: ($registerBody['error'] ?? ''));
-
-                if (!$registerSuccess) {
-                    $this->writeConnectionState([
-                        'status' => self::CONNECT_STATE_ERROR,
-                        'pairingCode' => $pairingCode,
-                        'pluginBaseUrl' => $pluginBaseUrl,
-                        'websiteId' => $websiteId,
-                        'lastPairingAttemptAt' => gmdate('c'),
-                        'lastError' => $registerErrorMessage !== '' ? $registerErrorMessage : 'Connector-Registrierung fehlgeschlagen',
-                    ]);
-
-                    $this->sendJson([
-                        'success' => false,
-                        'error' => $registerErrorMessage !== '' ? $registerErrorMessage : 'Connector-Registrierung fehlgeschlagen',
-                    ], $registerResponse['status'] ?? 502);
-                }
-
-                $this->finalizeSuccessfulConnection($websiteId, $pluginBaseUrl, null, [
-                    'exchange' => $exchangeData,
-                    'register' => $registerBody['data'] ?? $registerBody,
-                ]);
-            } catch (\Throwable $registerException) {
-                if ($this->isTimeoutException($registerException)) {
-                    $warningMessage = 'Die Website ist verbunden. Die technische Rückmeldung des Registers war nur verzögert.';
-                    $this->finalizeSuccessfulConnection($websiteId, $pluginBaseUrl, $warningMessage, [
-                        'exchange' => $exchangeData,
-                    ]);
-                }
-
-                throw $registerException;
-            }
         } catch (\Throwable $e) {
-            $this->writeConnectionState([
-                'status' => self::CONNECT_STATE_ERROR,
-                'pairingCode' => $pairingCode,
-                'pluginBaseUrl' => $pluginBaseUrl,
-                'websiteId' => $websiteId !== '' ? $websiteId : null,
-                'lastPairingAttemptAt' => gmdate('c'),
-                'lastError' => $e->getMessage(),
-            ]);
+            // Network error, timeout: the raw cURL message never reaches the customer.
+            $this->failConnect(self::CONNECT_TEXT_UNAVAILABLE, 502, $attempt, 'connect: pairing exchange failed: ' . $e->getMessage());
+        }
 
-            $this->sendJson([
-                'success' => false,
-                'error' => 'Verbindung konnte nicht hergestellt werden: ' . $e->getMessage(),
-            ], 500);
+        $exchangeStatus = (int) ($exchangeResponse['status'] ?? 0);
+        $exchangeBody = is_array($exchangeResponse['json'] ?? null) ? $exchangeResponse['json'] : [];
+        $exchangeSuccess = ($exchangeBody['success'] ?? false) === true;
+
+        if (!$exchangeSuccess) {
+            $this->failExchange($exchangeStatus, $exchangeBody, $attempt);
+        }
+
+        // The webapp's exchange response carries the connector credentials
+        // under `data.connection.*` (same shape as the WP/Joomla/TYPO3
+        // connectors read).
+        $exchangeData = is_array($exchangeBody['data'] ?? null) ? $exchangeBody['data'] : [];
+        $connection = is_array($exchangeData['connection'] ?? null) ? $exchangeData['connection'] : [];
+        $websiteId = trim((string) ($connection['websiteId'] ?? ''));
+        $apiToken = trim((string) ($connection['apiToken'] ?? ''));
+
+        if ($websiteId === '' || $apiToken === '') {
+            $this->failConnect(self::CONNECT_TEXT_FAILED, 502, $attempt, 'connect: exchange answer without complete connector credentials');
+        }
+
+        $attempt['websiteId'] = $websiteId;
+
+        if (!$this->writeStoredApiToken($apiToken)) {
+            $this->failConnect(self::CONNECT_TEXT_FAILED, 500, $attempt, 'connect: API token could not be stored in the plugin data dir');
+        }
+
+        try {
+            $registerResponse = $this->callWebappJson('/api/connectors/grav/register', [
+                'method' => 'POST',
+                'headers' => ['Authorization: Bearer ' . $apiToken],
+                'json' => [
+                    'websiteId' => $websiteId,
+                    'pluginBaseUrl' => $pluginBaseUrl,
+                ],
+            ]);
+        } catch (\Throwable $registerException) {
+            if ($this->isTimeoutException($registerException)) {
+                $warningMessage = 'Die Website ist verbunden. Die technische Rückmeldung des Registers war nur verzögert.';
+                $this->finalizeSuccessfulConnection($websiteId, $pluginBaseUrl, $warningMessage, [
+                    'exchange' => $exchangeData,
+                ]);
+            }
+
+            $this->finalizeIfWebappSaysConnected($apiToken, $websiteId, $pluginBaseUrl, $exchangeData, $attempt,
+                'connect: register failed: ' . $registerException->getMessage());
+        }
+
+        $registerBody = is_array($registerResponse['json'] ?? null) ? $registerResponse['json'] : [];
+        if (($registerBody['success'] ?? false) !== true) {
+            $registerErrorMessage = \Grav\Plugin\SiteCheckAccessibility\ConnectHandshake::errorMessage($registerBody['error'] ?? null, '');
+            $this->finalizeIfWebappSaysConnected($apiToken, $websiteId, $pluginBaseUrl, $exchangeData, $attempt,
+                'connect: register answered HTTP ' . (int) ($registerResponse['status'] ?? 0)
+                . ($registerErrorMessage !== '' ? ': ' . $registerErrorMessage : ''));
+        }
+
+        $this->finalizeSuccessfulConnection($websiteId, $pluginBaseUrl, null, [
+            'exchange' => $exchangeData,
+            'register' => $registerBody['data'] ?? $registerBody,
+        ]);
+    }
+
+    /**
+     * A failed pairing exchange. The webapp answers known failures with
+     * `{success:false, error:"<customer text>", code:"<CODE>"}`; that text is
+     * approved wording and goes to the customer verbatim. Anything else (no
+     * JSON, 5xx without code, an older webapp) is a generic text; the details,
+     * including the proxy/custom_base_url diagnosis, go to the Grav log.
+     *
+     * @param array<string, mixed> $body
+     * @param array<string, mixed> $attempt
+     */
+    private function failExchange(int $status, array $body, array $attempt): void
+    {
+        $code = is_string($body['code'] ?? null) ? trim((string) $body['code']) : '';
+        $webappText = \Grav\Plugin\SiteCheckAccessibility\ConnectHandshake::errorMessage($body['error'] ?? null, '');
+        $pluginBaseUrl = (string) ($attempt['pluginBaseUrl'] ?? '');
+
+        $logDetail = 'connect: pairing exchange answered HTTP ' . $status
+            . ($code !== '' ? ' ' . $code : '')
+            . ($webappText !== '' ? ': ' . $webappText : '');
+        $diagnosis = $this->explainBaseUrlMismatch($webappText, $status, $pluginBaseUrl);
+        if ($diagnosis !== $webappText) {
+            $logDetail .= ' | ' . trim(substr($diagnosis, strlen($webappText)));
+        }
+
+        if ($code !== '' && $webappText !== '') {
+            $this->failConnect($webappText, $status >= 400 ? $status : 502, $attempt, $logDetail, $code);
+        }
+
+        if ($body === [] || $status >= 500 || $status === 0) {
+            $this->failConnect(self::CONNECT_TEXT_UNAVAILABLE, 502, $attempt, $logDetail);
+        }
+
+        $this->failConnect(self::CONNECT_TEXT_FAILED, $status >= 400 ? $status : 502, $attempt, $logDetail);
+    }
+
+    /**
+     * L16: the exchange worked, the register call did not. The webapp may still
+     * have the website as connected (the register answer got lost, or the
+     * webapp already marked it on exchange). Ask it once with the new token;
+     * only if that fails too is it an error.
+     *
+     * @param array<string, mixed> $exchangeData
+     * @param array<string, mixed> $attempt
+     */
+    private function finalizeIfWebappSaysConnected(string $apiToken, string $websiteId, string $pluginBaseUrl, array $exchangeData, array $attempt, string $logDetail): void
+    {
+        $this->logConnectProblem($logDetail);
+
+        try {
+            $response = $this->callWebappJson('/api/connectors/grav/plugin-status', [
+                'method' => 'GET',
+                'headers' => ['Authorization: Bearer ' . $apiToken],
+                'timeout' => 5,
+            ]);
+            $body = is_array($response['json'] ?? null) ? $response['json'] : [];
+            $website = is_array($body['data']['website'] ?? null) ? $body['data']['website'] : [];
+            $connected = (int) ($response['status'] ?? 0) === 200
+                && ($body['success'] ?? false) === true
+                && (string) ($website['id'] ?? '') === $websiteId
+                && (string) ($website['status'] ?? '') === 'CONNECTED';
+        } catch (\Throwable $e) {
+            $this->logConnectProblem('connect: plugin-status check after register failure failed: ' . $e->getMessage());
+            $connected = false;
+        }
+
+        if ($connected) {
+            $this->finalizeSuccessfulConnection($websiteId, $pluginBaseUrl, null, [
+                'exchange' => $exchangeData,
+            ]);
+        }
+
+        $this->failConnect(self::CONNECT_TEXT_FAILED, 502, $attempt, 'connect: webapp does not report the website as connected after register failure');
+    }
+
+    /**
+     * Ends a connect attempt with a customer text: stores it as lastError and
+     * answers with it. `$logDetail` (technical) goes to the Grav log only.
+     *
+     * @param array<string, mixed> $attempt pairingCode, pluginBaseUrl, websiteId of this attempt
+     */
+    private function failConnect(string $customerText, int $httpStatus, array $attempt, string $logDetail = '', string $code = ''): void
+    {
+        if ($logDetail !== '') {
+            $this->logConnectProblem($logDetail);
+        }
+
+        $errorState = [
+            'status' => self::CONNECT_STATE_ERROR,
+            'pairingCode' => $attempt['pairingCode'] ?? null,
+            'pluginBaseUrl' => $attempt['pluginBaseUrl'] ?? null,
+            'lastPairingAttemptAt' => gmdate('c'),
+            'lastError' => $customerText,
+        ];
+        // Only overwrite the stored websiteId once this attempt knows one.
+        if (isset($attempt['websiteId'])) {
+            $errorState['websiteId'] = $attempt['websiteId'];
+        }
+        $this->writeConnectionState($errorState);
+
+        $payload = [
+            'success' => false,
+            'error' => $customerText,
+        ];
+        if ($code !== '') {
+            $payload['code'] = $code;
+        }
+
+        $this->sendJson($payload, $httpStatus);
+    }
+
+    private function logConnectProblem(string $detail): void
+    {
+        try {
+            $this->grav['log']->warning('[site-check] ' . $detail);
+        } catch (\Throwable $e) {
+            // Logging must never break the connect answer.
         }
     }
 
@@ -1487,6 +1766,9 @@ class SiteCheckAccessibilityPlugin extends Plugin
      * Grav 2 default) also the public URL and how to make Grav use it. The proxy
      * part is added to any failed exchange, since the next attempt would run into
      * the mismatch anyway.
+     *
+     * Since 1.1.0 this is a diagnosis for the Grav log only (failExchange());
+     * the customer sees the webapp's own text.
      */
     private function explainBaseUrlMismatch(string $message, int $status, string $pluginBaseUrl): string
     {
@@ -1690,6 +1972,72 @@ class SiteCheckAccessibilityPlugin extends Plugin
             }
         }
         return count($out) >= 2 ? $out : [];
+    }
+
+    /**
+     * 1.3.0 (FA-138) — formal check of an element_wrap item (contract:
+     * src/lib/fix-engine/element-wrap-contract.ts). Only the shape is checked
+     * here; whether the entries fit the page is decided at render time, where
+     * an entry that does not fit leaves the item unapplied. Tag, roles and
+     * style are fixed by the contract: a payload that names other values is
+     * refused, a payload that leaves them out gets the fixed ones.
+     *
+     * @param array<string,mixed> $item
+     * @return array{ok:bool,reason:string,itemSelectors:array<int,string>,itemWrapTag:?string}
+     */
+    private function normalizeElementWrapPayload(array $item): array
+    {
+        $fail = static function (string $reason): array {
+            return ['ok' => false, 'reason' => $reason, 'itemSelectors' => [], 'itemWrapTag' => null];
+        };
+        if (!is_array($item['itemSelectors'] ?? null)) {
+            return $fail('itemSelectors muss ein Array sein');
+        }
+        $itemSelectors = $this->normalizeReorderChildSelectors($item['itemSelectors']);
+        if (count($itemSelectors) < 2) {
+            return $fail('itemSelectors braucht mindestens 2 Einträge');
+        }
+        foreach ($itemSelectors as $itemSelector) {
+            if (!$this->isPlausibleSelector($itemSelector)) {
+                return $fail('itemSelectors enthält einen unplausiblen Selektor');
+            }
+        }
+        $selector = trim((string) ($item['selector'] ?? ''));
+        if ($selector !== '' && $selector !== $itemSelectors[0]) {
+            return $fail('selector muss der erste Eintrag von itemSelectors sein');
+        }
+        $itemWrapTag = $item['itemWrapTag'] ?? null;
+        if ($itemWrapTag !== null && $itemWrapTag !== 'span') {
+            return $fail('itemWrapTag muss "span" oder null sein');
+        }
+        $fixed = ['wrapperTag' => 'div', 'wrapperRole' => 'list', 'itemRole' => 'listitem'];
+        foreach ($fixed as $field => $expected) {
+            if (array_key_exists($field, $item) && strtolower(trim((string) $item[$field])) !== $expected) {
+                return $fail($field . ' muss "' . $expected . '" sein');
+            }
+        }
+        if (array_key_exists('style', $item)
+            && rtrim(strtolower(preg_replace('/\s+/', '', (string) $item['style']) ?? ''), ';') !== 'display:contents'
+        ) {
+            return $fail('style muss "display:contents" sein');
+        }
+        return ['ok' => true, 'reason' => '', 'itemSelectors' => $itemSelectors, 'itemWrapTag' => $itemWrapTag];
+    }
+
+    /**
+     * 1.3.0 (FA-138) — element_wrap id: keyed on the first entry like every
+     * selector override, the full entry list and the item tag in the suffix.
+     *
+     * @param array<int,string> $itemSelectors
+     */
+    private function buildElementWrapId(string $scope, string $pageKey, array $itemSelectors, ?string $itemWrapTag): string
+    {
+        return $this->buildSelectorOverrideId(
+            $scope,
+            $pageKey,
+            $itemSelectors[0],
+            'element_wrap:' . sha1(implode('>', $itemSelectors) . '|' . ($itemWrapTag ?? ''))
+        );
     }
 
     /**
@@ -2548,7 +2896,7 @@ class SiteCheckAccessibilityPlugin extends Plugin
 
     /**
      * 2.2.0: info-and-relationships element_remove preflight. Selector-only
-     * payload. Runtime removal via injectElementRemoveBootstrap().
+     * payload. Runtime removal via injectElementReplaceAndRemoveBootstraps().
      */
     private function upsertElementRemove(array $fix): array
     {
@@ -2884,6 +3232,46 @@ class SiteCheckAccessibilityPlugin extends Plugin
             'pageUrl' => $pageUrl,
             'parentSelector' => $parentSelector,
             'orderedChildSelectors' => $childSelectors,
+        ];
+    }
+
+    /**
+     * 1.3.0 (FA-138): element_wrap preflight (validation-only). Server-side apply
+     * happens in injectElementWrapBootstrap() via ServerHtmlMutator::applyElementWrap.
+     *
+     * No DOM pre-flight on purpose: the page fetched here is the DELIVERED page,
+     * and once the wrap is live the positional entries (`nav > a:nth-of-type(2)`)
+     * sit inside the wrapper and no longer match, so a re-apply would be refused
+     * for a fix that works. Whether the entries fit is decided at render time.
+     *
+     * Shape: { pageUrl, selector, itemSelectors: string[] (>=2), itemWrapTag: "span"|null, scope? }
+     */
+    private function upsertElementWrap(array $fix): array
+    {
+        $pageUrl = trim((string) ($fix['pageUrl'] ?? ''));
+        $scope = $this->normalizeOverrideScope($fix['scope'] ?? null);
+        if ($pageUrl === '') {
+            return ['success' => false, 'error' => 'pageUrl fehlt'];
+        }
+        $wrap = $this->normalizeElementWrapPayload($fix);
+        if ($wrap['ok'] !== true) {
+            return ['success' => false, 'error' => $wrap['reason']];
+        }
+        $pageKey = $this->normalizePageKey($pageUrl);
+        if ($pageKey === '') {
+            return ['success' => false, 'error' => 'pageUrl konnte nicht normalisiert werden'];
+        }
+
+        return [
+            'success' => true,
+            'id' => $this->buildElementWrapId($scope, $pageKey, $wrap['itemSelectors'], $wrap['itemWrapTag']),
+            'type' => 'element_wrap',
+            'scope' => $scope,
+            'pageKey' => $pageKey,
+            'pageUrl' => $pageUrl,
+            'selector' => $wrap['itemSelectors'][0],
+            'itemSelectors' => $wrap['itemSelectors'],
+            'itemWrapTag' => $wrap['itemWrapTag'],
         ];
     }
 
@@ -3699,26 +4087,61 @@ class SiteCheckAccessibilityPlugin extends Plugin
     }
 
     /**
-     * 2.2.0: element_replace bootstrap. Replaces matched elements with
-     * sanitized HTML (ul/ol/li). Idempotent via a data-sc-acc-element-replaced
-     * marker on the replacement root.
+     * 2.2.0: element_replace + element_remove bootstraps. element_replace swaps
+     * matched elements for sanitized HTML (ul/ol/li), idempotent via a
+     * data-sc-acc-element-replaced marker on the replacement root;
+     * element_remove deletes matched elements.
      *
-     * 1.1.7 — per-item `appliedIndex` guard (mirrors tag_replace). The
-     * data-sc-acc-element-replaced marker only protected against re-replacing
-     * the SAME (already-replaced) node, not against a DIFFERENT node sliding
-     * into the same positional selector. info-list-markup-missing emits
-     * `… > p:nth-of-type(N)`; once the target <p> becomes a <ul>, the next <p>
-     * (e.g. an unrelated "Kontaktformular" paragraph) shifts into position N,
-     * and the MutationObserver re-run replaced it with the SAME list. Once an
-     * item has been applied it is now permanently skipped within the IIFE's
-     * lifetime, so a second element can never be overwritten.
+     * FA-143: both families of the page go through ONE server-side pass
+     * (ServerHtmlMutator::applyElementReplaceAndRemove), so their positional
+     * selectors are resolved against the same unmutated document. A pseudo-list
+     * fix is one element_replace (the list takes the place of a row) plus one
+     * element_remove per other row, all as `… > p:nth-of-type(N)`. Run one after
+     * the other, the removes saw one <p> fewer and hit the paragraph after the
+     * list. Each client fallback still gets only the unapplied ops of its type.
      */
-    private function injectElementReplaceBootstrap(string $html, string $currentPageUrl, array $store): string
+    private function injectElementReplaceAndRemoveBootstraps(string $html, string $currentPageUrl, array $store): string
     {
         $currentPageKey = $this->normalizePageKey($currentPageUrl);
         if ($currentPageKey === '') return $html;
         $currentPageRoute = $this->resolvePageRoute($currentPageKey);
 
+        $replaceItems = $this->collectElementReplaceItems($store, $currentPageKey, $currentPageRoute);
+        $removeItems = $this->collectElementRemoveItems($store, $currentPageKey, $currentPageRoute);
+        if (count($replaceItems) === 0 && count($removeItems) === 0) return $html;
+
+        // Server-side first (2.0.0): parse once, replace + remove directly in the
+        // delivered HTML. Only targets absent from the server HTML (post-JS/SPA)
+        // fall back to the observer scripts below (data-sc-acc-fallback="1").
+        $mutation = (new \Grav\Plugin\SiteCheckAccessibility\ServerHtmlMutator())->applyElementReplaceAndRemove($html, $replaceItems, $removeItems);
+        $html = $mutation['html'];
+        $replaceFallback = $mutation['unappliedReplaceOps'];
+        $removeFallback = $mutation['unappliedRemoveOps'];
+
+        if (count($replaceItems) > 0) {
+            $this->pluginApplyDebug('INJECT-ELEMENT-REPLACE-SERVER', [
+                'itemsTotal' => count($replaceItems),
+                'fallbackToClient' => count($replaceFallback),
+            ]);
+        }
+        if (count($removeItems) > 0) {
+            $this->pluginApplyDebug('INJECT-ELEMENT-REMOVE-SERVER', [
+                'itemsTotal' => count($removeItems),
+                'fallbackToClient' => count($removeFallback),
+            ]);
+        }
+
+        $html = $this->appendElementReplaceFallback($html, $replaceFallback);
+        return $this->appendElementRemoveFallback($html, $removeFallback);
+    }
+
+    /**
+     * element_replace items of the current page, re-sanitized at render time.
+     *
+     * @return array<int,array{selector:string,html:string}>
+     */
+    private function collectElementReplaceItems(array $store, string $currentPageKey, ?string $currentPageRoute): array
+    {
         $items = [];
         foreach ($store as $item) {
             if (!is_array($item)) continue;
@@ -3747,43 +4170,16 @@ class SiteCheckAccessibilityPlugin extends Plugin
             }, $items), 0, 5),
         ]);
 
-        if (count($items) === 0) return $html;
-
-        // Server-side first (2.0.0): parse + replace the element directly in the delivered
-        // HTML. Only targets absent from the server HTML (post-JS/SPA) fall back to the
-        // observer script below (data-sc-acc-fallback="1").
-        $mutation = (new \Grav\Plugin\SiteCheckAccessibility\ServerHtmlMutator())->applyElementReplace($html, $items);
-        $html = $mutation['html'];
-        $fallbackItems = $mutation['unappliedOps'];
-
-        $this->pluginApplyDebug('INJECT-ELEMENT-REPLACE-SERVER', [
-            'itemsTotal' => count($items),
-            'fallbackToClient' => count($fallbackItems),
-        ]);
-
-        if (count($fallbackItems) === 0) return $html;
-
-        $json = json_encode($fallbackItems, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
-        if (!is_string($json)) return $html;
-
-        $snippet = '<script data-sc-acc-element-replace="1" data-sc-acc-fallback="1">(function(){var items=' . $json . ';var appliedIndex={};function apply(){for(var i=0;i<items.length;i+=1){if(appliedIndex[i])continue;var item=items[i];var nodes=[];try{nodes=document.querySelectorAll(item.selector);}catch(e){nodes=[];}if(nodes.length===0){if(window.__scAccDbg&&typeof console!=="undefined"&&console.warn){console.warn("[site-check] element_replace selector matched no elements:",item.selector);}continue;}if(nodes.length>1){if(window.__scAccDbg&&typeof console!=="undefined"&&console.warn){console.warn("[site-check] element_replace selector matched "+nodes.length+" elements; only the first is replaced. Selector should be unique:",item.selector);}}var target=nodes[0];if(!target||target.getAttribute("data-sc-acc-element-replaced")==="1")continue;var tpl=document.createElement("template");tpl.innerHTML=item.html;var frag=tpl.content;var root=frag.firstElementChild;if(!root)continue;root.setAttribute("data-sc-acc-element-replaced","1");if(target.parentNode){target.parentNode.replaceChild(frag,target);appliedIndex[i]=true;}}}if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",apply,{once:true});}else{apply();}var mo=new MutationObserver(function(){apply();});try{mo.observe(document.body||document.documentElement,{childList:true,subtree:true});}catch(e){}})();</script>';
-
-        if (stripos($html, '</body>') !== false) {
-            return preg_replace('/<\/body>/i', $snippet . '</body>', $html, 1) ?? ($html . $snippet);
-        }
-        return $html . $snippet;
+        return $items;
     }
 
     /**
-     * 2.2.0: element_remove bootstrap. Deletes matched elements. Idempotent
-     * because once removed there's nothing left to match on subsequent runs.
+     * element_remove items of the current page.
+     *
+     * @return array<int,array{selector:string}>
      */
-    private function injectElementRemoveBootstrap(string $html, string $currentPageUrl, array $store): string
+    private function collectElementRemoveItems(array $store, string $currentPageKey, ?string $currentPageRoute): array
     {
-        $currentPageKey = $this->normalizePageKey($currentPageUrl);
-        if ($currentPageKey === '') return $html;
-        $currentPageRoute = $this->resolvePageRoute($currentPageKey);
-
         $items = [];
         foreach ($store as $item) {
             if (!is_array($item)) continue;
@@ -3804,16 +4200,116 @@ class SiteCheckAccessibilityPlugin extends Plugin
             }, $items), 0, 5),
         ]);
 
+        return $items;
+    }
+
+    /**
+     * Client fallback for element_replace ops the server pass could not apply.
+     *
+     * 1.1.7 — per-item `appliedIndex` guard (mirrors tag_replace). The
+     * data-sc-acc-element-replaced marker only protected against re-replacing
+     * the SAME (already-replaced) node, not against a DIFFERENT node sliding
+     * into the same positional selector. info-list-markup-missing emits
+     * `… > p:nth-of-type(N)`; once the target <p> becomes a <ul>, the next <p>
+     * (e.g. an unrelated "Kontaktformular" paragraph) shifts into position N,
+     * and the MutationObserver re-run replaced it with the SAME list. Once an
+     * item has been applied it is now permanently skipped within the IIFE's
+     * lifetime, so a second element can never be overwritten.
+     *
+     * @param array<int,array<string,mixed>> $fallbackItems
+     */
+    private function appendElementReplaceFallback(string $html, array $fallbackItems): string
+    {
+        if (count($fallbackItems) === 0) return $html;
+
+        $json = json_encode($fallbackItems, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        if (!is_string($json)) return $html;
+
+        $snippet = '<script data-sc-acc-element-replace="1" data-sc-acc-fallback="1">(function(){var items=' . $json . ';var appliedIndex={};function apply(){for(var i=0;i<items.length;i+=1){if(appliedIndex[i])continue;var item=items[i];var nodes=[];try{nodes=document.querySelectorAll(item.selector);}catch(e){nodes=[];}if(nodes.length===0){if(window.__scAccDbg&&typeof console!=="undefined"&&console.warn){console.warn("[site-check] element_replace selector matched no elements:",item.selector);}continue;}if(nodes.length>1){if(window.__scAccDbg&&typeof console!=="undefined"&&console.warn){console.warn("[site-check] element_replace selector matched "+nodes.length+" elements; only the first is replaced. Selector should be unique:",item.selector);}}var target=nodes[0];if(!target||target.getAttribute("data-sc-acc-element-replaced")==="1")continue;var tpl=document.createElement("template");tpl.innerHTML=item.html;var frag=tpl.content;var root=frag.firstElementChild;if(!root)continue;root.setAttribute("data-sc-acc-element-replaced","1");if(target.parentNode){target.parentNode.replaceChild(frag,target);appliedIndex[i]=true;}}}if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",apply,{once:true});}else{apply();}var mo=new MutationObserver(function(){apply();});try{mo.observe(document.body||document.documentElement,{childList:true,subtree:true});}catch(e){}})();</script>';
+
+        if (stripos($html, '</body>') !== false) {
+            return preg_replace('/<\/body>/i', $snippet . '</body>', $html, 1) ?? ($html . $snippet);
+        }
+        return $html . $snippet;
+    }
+
+    /**
+     * Client fallback for element_remove ops the server pass could not apply.
+     *
+     * FA-143: two-phase like the tag_replace fallback (resolve every item, then
+     * remove), and a per-item `appliedIndex` like the element_replace fallback.
+     * "Nothing left to match" is no idempotency for a positional selector:
+     * after `p:nth-of-type(2)` is gone, the next <p> slides into position 2,
+     * and every MutationObserver re-run deleted one more customer paragraph.
+     * Once an item has removed its targets it is never applied again within
+     * the IIFE's lifetime.
+     *
+     * @param array<int,array<string,mixed>> $fallbackItems
+     */
+    private function appendElementRemoveFallback(string $html, array $fallbackItems): string
+    {
+        if (count($fallbackItems) === 0) return $html;
+
+        $json = json_encode($fallbackItems, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        if (!is_string($json)) return $html;
+
+        $snippet = '<script data-sc-acc-element-remove="1" data-sc-acc-fallback="1">(function(){var items=' . $json . ';var appliedIndex={};function apply(){var pending=[];var claimed=[];for(var i=0;i<items.length;i+=1){if(appliedIndex[i])continue;var item=items[i];var nodes=[];try{nodes=document.querySelectorAll(item.selector);}catch(e){nodes=[];}if(nodes.length===0)continue;var own=[];for(var j=0;j<nodes.length;j+=1){var candidate=nodes[j];if(!candidate||claimed.indexOf(candidate)!==-1)continue;claimed.push(candidate);own.push(candidate);}pending.push({index:i,targets:own});}for(var p=0;p<pending.length;p+=1){var tg=pending[p].targets;for(var k=0;k<tg.length;k+=1){if(tg[k].parentNode){tg[k].parentNode.removeChild(tg[k]);}}appliedIndex[pending[p].index]=true;}}if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",apply,{once:true});}else{apply();}var mo=new MutationObserver(function(){apply();});try{mo.observe(document.body||document.documentElement,{childList:true,subtree:true});}catch(e){}})();</script>';
+
+        if (stripos($html, '</body>') !== false) {
+            return preg_replace('/<\/body>/i', $snippet . '</body>', $html, 1) ?? ($html . $snippet);
+        }
+        return $html . $snippet;
+    }
+
+    /**
+     * 1.3.0 (FA-138): element_wrap bootstrap. Server-side first
+     * (ServerHtmlMutator::applyElementWrap puts the entries into an invisible
+     * `<div role="list">`, each in a `<span role="listitem">` or with the role on
+     * the li itself). Only items whose entries are absent from the server HTML
+     * (post-JS/SPA) fall back to the observer script.
+     *
+     * The fallback resolves every item before it moves anything, applies each item
+     * once (`appliedIndex`), and treats an item as done when its first entry sits in
+     * a marked wrapper or its parent already holds the marked list, so a wrap the
+     * server already wrote is never nested a second time. An item that does not fit
+     * (no unique match, different parents) is simply not applied.
+     */
+    private function injectElementWrapBootstrap(string $html, string $currentPageUrl, array $store): string
+    {
+        $currentPageKey = $this->normalizePageKey($currentPageUrl);
+        if ($currentPageKey === '') return $html;
+        $currentPageRoute = $this->resolvePageRoute($currentPageKey);
+
+        $items = [];
+        foreach ($store as $item) {
+            if (!is_array($item)) continue;
+            if (($item['type'] ?? '') !== 'element_wrap') continue;
+
+            $scope = $this->normalizeOverrideScope($item['scope'] ?? null);
+            if ($scope === 'occurrence' && !$this->pageKeysMatch((string) ($item['pageKey'] ?? ''), $currentPageKey, $currentPageRoute)) continue;
+
+            $wrap = $this->normalizeElementWrapPayload($item);
+            if ($wrap['ok'] !== true) continue;
+
+            $items[] = [
+                'selector' => $wrap['itemSelectors'][0],
+                'itemSelectors' => $wrap['itemSelectors'],
+                'itemWrapTag' => $wrap['itemWrapTag'],
+            ];
+        }
+
+        $this->pluginApplyDebug('INJECT-ELEMENT-WRAP', [
+            'currentPageKey' => $currentPageKey,
+            'matchedItems' => count($items),
+        ]);
+
         if (count($items) === 0) return $html;
 
-        // Server-side first (2.0.0): remove matched elements directly from the delivered
-        // HTML. Only elements absent from the server HTML (post-JS/SPA) fall back to the
-        // observer-based client script below (tagged data-sc-acc-fallback="1").
-        $mutation = (new \Grav\Plugin\SiteCheckAccessibility\ServerHtmlMutator())->applyElementRemove($html, $items);
+        $mutation = (new \Grav\Plugin\SiteCheckAccessibility\ServerHtmlMutator())->applyElementWrap($html, $items);
         $html = $mutation['html'];
         $fallbackItems = $mutation['unappliedOps'];
 
-        $this->pluginApplyDebug('INJECT-ELEMENT-REMOVE-SERVER', [
+        $this->pluginApplyDebug('INJECT-ELEMENT-WRAP-SERVER', [
             'itemsTotal' => count($items),
             'fallbackToClient' => count($fallbackItems),
         ]);
@@ -3823,7 +4319,7 @@ class SiteCheckAccessibilityPlugin extends Plugin
         $json = json_encode($fallbackItems, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
         if (!is_string($json)) return $html;
 
-        $snippet = '<script data-sc-acc-element-remove="1" data-sc-acc-fallback="1">(function(){var items=' . $json . ';function apply(){for(var i=0;i<items.length;i+=1){var item=items[i];var nodes=[];try{nodes=document.querySelectorAll(item.selector);}catch(e){nodes=[];}for(var j=0;j<nodes.length;j+=1){var target=nodes[j];if(target&&target.parentNode){target.parentNode.removeChild(target);}}}}if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",apply,{once:true});}else{apply();}var mo=new MutationObserver(function(){apply();});try{mo.observe(document.body||document.documentElement,{childList:true,subtree:true});}catch(e){}})();</script>';
+        $snippet = '<script data-sc-acc-element-wrap="1" data-sc-acc-fallback="1">(function(){var items=' . $json . ';var appliedIndex={};var MARK="data-sc-acc-wrapped";function one(sel){var n=[];try{n=document.querySelectorAll(sel);}catch(e){n=[];}return n.length===1?n[0]:null;}function marked(node){return !!(node&&node.nodeType===1&&node.getAttribute(MARK)==="1");}function hasList(parent){for(var c=parent.firstChild;c;c=c.nextSibling){if(marked(c)&&c.getAttribute("role")==="list")return true;}return false;}function make(tag,role){var el=document.createElement(tag);el.setAttribute("role",role);el.setAttribute("style","display:contents");el.setAttribute(MARK,"1");return el;}function resolve(item){var sels=item.itemSelectors||[];if(sels.length<2)return "done";var entries=[];for(var j=0;j<sels.length;j+=1){var node=one(sels[j]);if(j===0&&node&&marked(node.parentNode))return "done";if(!node||entries.indexOf(node)!==-1)return null;entries.push(node);}var parent=entries[0].parentNode;if(!parent)return null;for(var k=0;k<entries.length;k+=1){if(entries[k].parentNode!==parent)return null;}if(hasList(parent))return "done";var range=[];var next=0;var last=entries[entries.length-1];for(var n=entries[0];n;n=n.nextSibling){range.push(n);if(next<entries.length&&n===entries[next])next+=1;if(n===last)break;}if(next!==entries.length)return null;return {entries:entries,range:range,parent:parent};}function commit(item,r){var wrapper=make("div","list");r.parent.insertBefore(wrapper,r.entries[0]);var cur=null;for(var m=0;m<r.range.length;m+=1){var node=r.range[m];var isEntry=r.entries.indexOf(node)!==-1;if(item.itemWrapTag!=="span"){if(isEntry)node.setAttribute("role","listitem");wrapper.appendChild(node);continue;}if(isEntry){cur=make("span","listitem");wrapper.appendChild(cur);}cur.appendChild(node);}}function apply(){var pending=[];var claimed=[];for(var i=0;i<items.length;i+=1){if(appliedIndex[i])continue;var r=resolve(items[i]);if(r==="done"){appliedIndex[i]=true;continue;}if(!r)continue;var overlap=false;for(var q=0;q<r.range.length;q+=1){if(claimed.indexOf(r.range[q])!==-1){overlap=true;break;}}if(overlap){appliedIndex[i]=true;continue;}for(var s=0;s<r.range.length;s+=1)claimed.push(r.range[s]);pending.push({index:i,result:r});}for(var p=0;p<pending.length;p+=1){commit(items[pending[p].index],pending[p].result);appliedIndex[pending[p].index]=true;}}if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",apply,{once:true});}else{apply();}var mo=new MutationObserver(function(){apply();});try{mo.observe(document.body||document.documentElement,{childList:true,subtree:true});}catch(e){}})();</script>';
 
         if (stripos($html, '</body>') !== false) {
             return preg_replace('/<\/body>/i', $snippet . '</body>', $html, 1) ?? ($html . $snippet);
@@ -4796,17 +5292,18 @@ class SiteCheckAccessibilityPlugin extends Plugin
     }
 
     /**
-     * Derive the raw 32-byte Ed25519 public key from a base64-encoded SPKI
-     * DER blob. SPKI wraps the 32-byte key as a trailer after a fixed
-     * 12-byte AlgorithmIdentifier prefix, so substr(-32) is safe.
+     * 1.1.0: the trusted Ed25519 sync keys, current first, then the rotation
+     * slot when it is filled. Each entry carries its key id and the raw
+     * 32 bytes (see SigningKeys); unusable entries are skipped.
+     *
+     * @return array<int, array{id: string, raw: string}>
      */
-    private function getRawPublicKeyBytes(): ?string
+    private function getTrustedSigningKeys(): array
     {
-        $b64 = trim(self::SYNC_PUBLIC_KEY_B64);
-        if ($b64 === '') return null;
-        $der = base64_decode($b64, true);
-        if (!is_string($der) || strlen($der) < 32) return null;
-        return substr($der, -32);
+        return \Grav\Plugin\SiteCheckAccessibility\SigningKeys::trusted([
+            self::SYNC_PUBLIC_KEY_B64,
+            self::SYNC_PUBLIC_KEY_NEXT_B64,
+        ]);
     }
 
     private function verifyEnvelopeSignature(string $payloadBytes, string $signatureB64): bool
@@ -4824,26 +5321,26 @@ class SiteCheckAccessibilityPlugin extends Plugin
             ]);
             return false;
         }
-        $pub = $this->getRawPublicKeyBytes();
-        if ($pub === null || strlen($pub) !== 32) {
+        $trustedKeys = $this->getTrustedSigningKeys();
+        if ($trustedKeys === []) {
             $this->pluginApplyDebug('VERIFY-DIAG', [
                 'stage' => 'pub_extract',
-                'pubLen' => $pub === null ? -1 : strlen($pub),
+                'trustedKeyCount' => 0,
             ]);
             return false;
         }
         try {
-            $ok = sodium_crypto_sign_verify_detached($sig, $payloadBytes, $pub);
+            // 1.1.0: valid when ANY trusted key (current or rotation slot) verifies.
+            $keyId = \Grav\Plugin\SiteCheckAccessibility\SigningKeys::verifyingKeyId($payloadBytes, $sig, $trustedKeys);
             $this->pluginApplyDebug('VERIFY-DIAG', [
                 'stage' => 'sodium_called',
-                'result' => $ok,
+                'result' => $keyId !== null,
+                'verifiedKeyId' => $keyId,
+                'trustedKeyIds' => \Grav\Plugin\SiteCheckAccessibility\SigningKeys::ids($trustedKeys),
                 'payloadLen' => strlen($payloadBytes),
                 'sigLen' => strlen($sig),
-                'pubLen' => strlen($pub),
-                'pubFirst4Hex' => bin2hex(substr($pub, 0, 4)),
-                'pubLast4Hex' => bin2hex(substr($pub, -4)),
             ]);
-            return $ok;
+            return $keyId !== null;
         } catch (\Throwable $e) {
             $this->pluginApplyDebug('VERIFY-DIAG', [
                 'stage' => 'sodium_threw',
@@ -4942,6 +5439,17 @@ class SiteCheckAccessibilityPlugin extends Plugin
             'lastIssuedAt' => $issuedAt,
             'lastSuccessfulFetchAt' => gmdate('c'),
         ]);
+
+        // 2.6.0 Medien: die WebVTT-Spuren aus diesem Envelope ablegen. Hier
+        // und nicht beim Ausliefern einer Seite: eine Datei je Anfrage zu
+        // schreiben waere Verschwendung, und der Cache-Schreibvorgang ist
+        // ohnehin der Moment, in dem sich der Stand aendert. Die Nutzlast ist
+        // an dieser Stelle schon signaturgeprueft und vom SignedCacheGuard
+        // angenommen.
+        if (is_array($payload['overrides'] ?? null)) {
+            $this->persistMediaTracks($payload['overrides']);
+        }
+
         return null;
     }
 
@@ -5302,9 +5810,13 @@ class SiteCheckAccessibilityPlugin extends Plugin
             'UTF-8'
         );
 
+        // async, not defer: a deferred script holds the page's DOMContentLoaded
+        // until it has arrived from the webapp, and with it every slider that
+        // only then shows its hero image (LCP). The loader waits for `load`
+        // itself before it fetches the widget.
         $snippet =
             '<script>window.__SWACC_OVERLAY_BOOTSTRAP__=' . $json . ';</script>' .
-            '<script src="' . $scriptSrc . '" defer data-sc-acc-overlay-runtime="1"></script>';
+            '<script src="' . $scriptSrc . '" async data-sc-acc-overlay-runtime="1"></script>';
 
         if (stripos($html, '</body>') !== false) {
             $result = preg_replace('/<\/body>/i', $snippet . '</body>', $html, 1);
@@ -5766,6 +6278,15 @@ class SiteCheckAccessibilityPlugin extends Plugin
      * (The /connect-status probe is intentionally left unauthenticated because
      * the webapp polls it without credentials as a reachability check.)
      */
+    /** Admin panel only (connect-start): the per-install admin secret, no token fallback. */
+    private function assertAdminSecret(): void
+    {
+        $provided = trim((string) ($_SERVER['HTTP_X_SC_ACC_NONCE'] ?? ''));
+        if ($provided === '' || !hash_equals($this->getAdminActionSecret(), $provided)) {
+            $this->sendJson(['success' => false, 'error' => 'Unauthorized'], 401);
+        }
+    }
+
     private function assertAdminOrToken(): void
     {
         $provided = trim((string) ($_SERVER['HTTP_X_SC_ACC_NONCE'] ?? ''));
@@ -5919,6 +6440,7 @@ class SiteCheckAccessibilityPlugin extends Plugin
             'pluginVersion' => self::PLUGIN_VERSION,
             'overlayRuntimeEnabled' => (bool) $this->config->get('plugins.site-check-accessibility.overlay_runtime_enabled', true),
             'adminConnectEndpoint' => $pluginBaseUrl . '/plugin/sw-acc-connector/connect',
+            'adminConnectStartEndpoint' => $pluginBaseUrl . '/plugin/sw-acc-connector/connect-start',
             'adminDisconnectEndpoint' => $pluginBaseUrl . '/plugin/sw-acc-connector/disconnect',
             'adminStatusEndpoint' => $pluginBaseUrl . '/plugin/sw-acc-connector/connect-status',
             'adminWebappStatusEndpoint' => $pluginBaseUrl . '/plugin/sw-acc-connector/webapp-status',
@@ -5991,5 +6513,297 @@ class SiteCheckAccessibilityPlugin extends Plugin
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         exit;
+    }
+
+    /**
+     * 2.6.0 Medien: Verzeichnis für die WebVTT-Spuren.
+     *
+     * Liegt unter dem geschützten Datenverzeichnis und wird über die Route
+     * /plugin/sw-acc-connector/media-track ausgeliefert. Der Grund für den
+     * Umweg: ein <track src> braucht eine erreichbare URL, aber das
+     * Datenverzeichnis trägt ein Deny-All, damit Token und Cache nie über HTTP
+     * zu holen sind. Die Dateien dort einfach freizugeben würde diesen Schutz
+     * aufweichen; die Route liefert stattdessen genau diese Dateien aus, mit
+     * geprüftem Namen und festem Content-Type.
+     */
+    private function getMediaTrackDir(): string
+    {
+        $dir = $this->getDataDir() . '/media-tracks';
+        if (!is_dir($dir)) {
+            mkdir($dir, 0775, true);
+        }
+        return $dir;
+    }
+
+    /**
+     * Prüft einen Dateinamen aus dem Envelope.
+     *
+     * Der Name kommt von aussen und landet in einem Pfad, also fail-closed:
+     * erlaubt sind genau zwei Segmente aus UUID-artigen Zeichen und eine
+     * .vtt-Endung. Kein "..", keine Schrägstriche darüber hinaus, keine
+     * anderen Endungen.
+     */
+    private function isSafeMediaTrackName(string $name): bool
+    {
+        return (bool) preg_match('#^[A-Za-z0-9][A-Za-z0-9_-]{0,63}/[A-Za-z0-9][A-Za-z0-9._-]{0,79}\.vtt$#', $name);
+    }
+
+    /**
+     * Prüft einen WebVTT-Inhalt, bevor er auf die Platte geht.
+     *
+     * Fail-closed wie bei den anderen Fix-Types: der Inhalt kommt aus einem
+     * signierten Envelope, aber die Signatur sagt nur, dass wir ihn geschickt
+     * haben, nicht dass er wohlgeformt ist. Geprüft wird der Kopf, die Größe
+     * und dass kein Markup enthalten ist: eine .vtt-Datei mit <script> darin
+     * wäre in einem Browser, der sie direkt öffnet, ausführbar.
+     *
+     * @return array{ok:bool,reason:string}
+     */
+    private function validateVttContent(string $content): array
+    {
+        if ($content === '') {
+            return ['ok' => false, 'reason' => 'empty'];
+        }
+        if (strlen($content) > 262144) {
+            return ['ok' => false, 'reason' => 'too_large'];
+        }
+        // WEBVTT muss am Anfang stehen, ein BOM davor ist erlaubt.
+        $head = ltrim($content, "\xEF\xBB\xBF \t\r\n");
+        if (strncmp($head, 'WEBVTT', 6) !== 0) {
+            return ['ok' => false, 'reason' => 'missing_webvtt_header'];
+        }
+        if (preg_match('/<\s*(script|iframe|object|embed|style)\b/i', $content) === 1) {
+            return ['ok' => false, 'reason' => 'markup_in_track'];
+        }
+        return ['ok' => true, 'reason' => ''];
+    }
+
+    /**
+     * Legt die Spuren eines Envelopes ab.
+     *
+     * Läuft beim Cache-Schreiben und nicht beim Ausliefern der Seite: eine
+     * Datei je Anfrage zu schreiben wäre Verschwendung, und der Cache ist
+     * ohnehin der Moment, in dem sich der Stand ändert. Idempotent über den
+     * Inhaltsvergleich, damit ein unveränderter Push keine Schreiblast macht.
+     *
+     * @param array<int,array<string,mixed>> $overrides
+     */
+    private function persistMediaTracks(array $overrides): void
+    {
+        foreach ($overrides as $item) {
+            if (!is_array($item) || ($item['type'] ?? '') !== 'media_track') {
+                continue;
+            }
+            $name = trim((string) ($item['fileName'] ?? ''));
+            $content = (string) ($item['content'] ?? '');
+            if (!$this->isSafeMediaTrackName($name)) {
+                continue;
+            }
+            $check = $this->validateVttContent($content);
+            if ($check['ok'] !== true) {
+                continue;
+            }
+
+            $target = $this->getMediaTrackDir() . '/' . $name;
+            $dir = dirname($target);
+            if (!is_dir($dir)) {
+                mkdir($dir, 0775, true);
+            }
+            // Unveränderte Datei nicht neu schreiben.
+            if (is_file($target) && @file_get_contents($target) === $content) {
+                continue;
+            }
+            @file_put_contents($target, $content);
+        }
+    }
+
+    /**
+     * Liefert eine abgelegte Spur aus.
+     *
+     * Öffentlich erreichbar und ohne Token: die Datei ist der Untertitel einer
+     * öffentlichen Seite, sie ist kein Geheimnis. Geschützt wird sie gegen
+     * Pfadausbruch und gegen Auslieferung von allem, was keine .vtt ist.
+     */
+    private function handleMediaTrackEndpoint(): void
+    {
+        $name = isset($_GET['file']) ? (string) $_GET['file'] : '';
+        if (!$this->isSafeMediaTrackName($name)) {
+            $this->sendJson(['error' => 'invalid_file'], 400);
+            return;
+        }
+
+        $base = $this->getMediaTrackDir();
+        $target = $base . '/' . $name;
+        // Zweiter Riegel nach der Namensprüfung: der aufgelöste Pfad muss im
+        // Verzeichnis liegen. Namensprüfung und Pfadprüfung fangen
+        // verschiedene Fehler, deshalb beide.
+        $real = realpath($target);
+        $realBase = realpath($base);
+        if ($real === false || $realBase === false || strncmp($real, $realBase, strlen($realBase)) !== 0) {
+            $this->sendJson(['error' => 'not_found'], 404);
+            return;
+        }
+
+        header('Content-Type: text/vtt; charset=utf-8');
+        // Die Fassung steht im Dateinamen, ein geänderter Untertitel bekommt
+        // also eine neue URL. Damit ist langes Zwischenspeichern gefahrlos.
+        header('Cache-Control: public, max-age=86400');
+        header('Access-Control-Allow-Origin: *');
+        echo (string) file_get_contents($real);
+        exit;
+    }
+
+    /** Öffentliche URL einer abgelegten Spur. */
+    private function getMediaTrackUrl(string $fileName): string
+    {
+        $base = rtrim((string) $this->grav['base_url_absolute'], '/');
+        return $base . '/plugin/sw-acc-connector/media-track?file=' . rawurlencode($fileName);
+    }
+
+    /**
+     * 2.6.0 Medien: track-Elemente in die Medien der Seite setzen.
+     *
+     * Serverseitig und nicht über einen Bootstrap: ein <track> muss im Markup
+     * stehen, wenn der Browser das Medienelement aufbaut. Per JavaScript
+     * nachgereicht wird es von manchen Browsern ignoriert, und ohne unser
+     * Skript wäre gar nichts da. Genau darum geht es aber: nach der
+     * Auslieferung ist die Seite auch ohne die Player-Runtime untertitelt.
+     *
+     * @param array<int,array<string,mixed>> $overrides
+     */
+    private function injectMediaTracksIntoHtml(string $html, string $pageUrl, array $overrides): string
+    {
+        $pageKey = $this->normalizePageKey($pageUrl);
+        $pageRoute = $this->resolvePageRoute($pageKey);
+        $operations = [];
+        // Zaehler fuer die Diagnose. Ohne sie ist ein "die Spur kommt nicht an"
+        // nicht auflösbar: jeder der Filter unten ist ein stiller continue.
+        $seen = 0;
+        $skippedOtherPage = 0;
+        $skippedInvalid = 0;
+        $skippedMissingFile = 0;
+
+        foreach ($overrides as $item) {
+            if (!is_array($item) || ($item['type'] ?? '') !== 'media_track') {
+                continue;
+            }
+            $seen++;
+            // Die Zuordnung selbst ableiten: pageKey wird in
+            // indexOverrideItemsById nur für Items ohne eigene id gesetzt, und
+            // Medienspuren bringen ihre id mit. Fail-closed über
+            // pageKeysMatch, denn ohne Zuordnung landete die Spur auf jeder
+            // Seite, deren Selektor zufällig passt, und dann lägen fremde
+            // Untertitel unter einem anderen Video.
+            $itemPageKey = (string) ($item['pageKey'] ?? '');
+            if ($itemPageKey === '') {
+                $itemPageKey = $this->normalizePageKey((string) ($item['pageUrl'] ?? ''));
+            }
+            if (!$this->pageKeysMatch($itemPageKey, $pageKey, $pageRoute)) {
+                $skippedOtherPage++;
+                continue;
+            }
+            $selector = trim((string) ($item['selector'] ?? ''));
+            $fileName = trim((string) ($item['fileName'] ?? ''));
+            $kind = (string) ($item['trackKind'] ?? '');
+            if ($selector === '' || !$this->isSafeMediaTrackName($fileName)) {
+                $skippedInvalid++;
+                continue;
+            }
+            if ($kind !== 'captions' && $kind !== 'descriptions') {
+                $skippedInvalid++;
+                continue;
+            }
+            // Nur eine Spur anbieten, deren Datei wirklich liegt. Ein <track>
+            // auf eine fehlende Datei zeigt im Player einen leeren
+            // Untertiteleintrag, und das ist schlechter als keiner.
+            if (!is_file($this->getMediaTrackDir() . '/' . $fileName)) {
+                $skippedMissingFile++;
+                continue;
+            }
+
+            $operations[] = [
+                'selector' => $selector,
+                'trackKind' => $kind,
+                'language' => preg_replace('/[^A-Za-z-]/', '', (string) ($item['language'] ?? 'de')) ?: 'de',
+                'label' => trim((string) ($item['label'] ?? '')),
+                'src' => $this->getMediaTrackUrl($fileName),
+                'id' => sha1($fileName . '|' . $selector),
+            ];
+        }
+
+        $diag = [
+            'currentPageKey' => $pageKey,
+            'currentPageRoute' => $pageRoute,
+            'seenItems' => $seen,
+            'matchedItems' => count($operations),
+            'skippedForOtherPage' => $skippedOtherPage,
+            'skippedInvalid' => $skippedInvalid,
+            'skippedMissingFile' => $skippedMissingFile,
+            'firstSelectors' => array_slice(array_column($operations, 'selector'), 0, 3),
+        ];
+
+        if ($operations === []) {
+            $this->pluginApplyDebug('INJECT-MEDIA-TRACKS', $diag);
+            return $html;
+        }
+
+        try {
+            $mutator = new \Grav\Plugin\SiteCheckAccessibility\ServerHtmlMutator();
+            $result = $mutator->applyMediaTracks($html, $operations);
+            // Marke für den Runtime-Bootstrap: nur diese Seite hat Spuren
+            // bekommen. Am HTML gemessen und nicht an der Zahl der
+            // Operationen, damit eine bereits vorhandene Spur mitzählt.
+            $this->mediaTracksAppliedOnPage = stripos($result['html'], 'data-sc-media') !== false;
+            $diag['unappliedOps'] = count($result['unappliedOps']);
+            $diag['markedOnPage'] = $this->mediaTracksAppliedOnPage;
+            $this->pluginApplyDebug('INJECT-MEDIA-TRACKS', $diag);
+            return $result['html'];
+        } catch (\Throwable $e) {
+            $this->grav['log']->error('[site-check] media tracks failed: ' . $e->getMessage());
+            $diag['error'] = $e->getMessage();
+            $this->pluginApplyDebug('INJECT-MEDIA-TRACKS', $diag);
+            return $html;
+        }
+    }
+
+    /**
+     * 2.6.0 Medien: die Player-Runtime laden.
+     *
+     * Nur wenn diese Seite eine ausgelieferte Spur bekommen hat. Ein Skript von
+     * 145 Kilobyte auf jeder Seite zu laden, auch auf denen ohne Medium, wäre
+     * eine Zumutung für die Ladezeit und bringt dort nichts.
+     *
+     * Die Runtime wertet die Medien auf, sie ersetzt sie nicht: die
+     * track-Elemente stehen schon im Markup, und ohne dieses Skript zeigt der
+     * Browser seine eigenen Bedienelemente mit derselben Untertitelspur. Was
+     * die Runtime hinzufügt, sind der Beschreibungsschalter, das Transkript und
+     * die anpassbaren Untertitel.
+     */
+    private function injectPlayerRuntimeBootstrap(string $html): string
+    {
+        if (stripos($html, 'data-sc-player-runtime="1"') !== false) {
+            return $html;
+        }
+        // Nur laden, wenn DIESE Seite eine Spur bekommen hat. Die Marke setzt
+        // injectMediaTracksIntoHtml, das direkt davor läuft. Am Attribut im
+        // HTML allein liesse sich das nicht ablesen: eine Seite kann
+        // data-sc-media aus eigener Hand tragen, und dann würde die Runtime
+        // ohne eine einzige ausgelieferte Spur geladen.
+        if (!$this->mediaTracksAppliedOnPage) {
+            return $html;
+        }
+
+        $scriptSrc = htmlspecialchars(
+            $this->getWebappBaseUrl() . '/api/player/runtime.js',
+            ENT_QUOTES,
+            'UTF-8'
+        );
+        $snippet = '<script src="' . $scriptSrc . '" defer data-sc-player-runtime="1"></script>';
+
+        if (stripos($html, '</body>') !== false) {
+            $result = preg_replace('/<\/body>/i', $snippet . '</body>', $html, 1);
+            return is_string($result) ? $result : ($html . $snippet);
+        }
+        return $html . $snippet;
     }
 }
