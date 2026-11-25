@@ -1,7 +1,7 @@
 name: Site-Check Accessibility
 slug: site-check-accessibility
 type: plugin
-version: 1.3.0
+version: 1.4.1
 description: "Verbindet eine Grav-Website mit der Site-Check Accessibility-Webapp und schreibt geprüfte Barrierefreiheits-Fixes serverseitig in die ausgelieferte Seite. Inkl. optionalem Assistenz-Widget."
 icon: universal-access
 author:

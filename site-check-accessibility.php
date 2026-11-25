@@ -40,10 +40,12 @@ require_once __DIR__ . '/lib/SignedCacheGuard.php';
 require_once __DIR__ . '/lib/SigningKeys.php';
 // Plugin-led connect (1.1.0): one-time state, start URL, presence.
 require_once __DIR__ . '/lib/ConnectHandshake.php';
+// 1.4.0 (B8): which attribute names an override may write or remove.
+require_once __DIR__ . '/lib/AttributeNamePolicy.php';
 
 class SiteCheckAccessibilityPlugin extends Plugin
 {
-    private const PLUGIN_VERSION = '1.3.0';
+    private const PLUGIN_VERSION = '1.4.1';
     // Which connector product line this plugin belongs to; reported by the healthcheck.
     private const CONNECTOR_LINEAGE = 'site-check';
     // Block-level tags that receive a data-sw-block-id marker for
@@ -517,6 +519,8 @@ class SiteCheckAccessibilityPlugin extends Plugin
                 'media-track',
                 'page-inventory',
                 'server-side-apply',
+                // 1.4.0 (B8): attribute names outside the allowlist are rejected.
+                'attribute-name-allowlist',
             ],
             'connectorLineage' => self::CONNECTOR_LINEAGE,
             'trustedSigningKeyIds' => \Grav\Plugin\SiteCheckAccessibility\SigningKeys::ids($this->getTrustedSigningKeys()),
@@ -887,6 +891,18 @@ class SiteCheckAccessibilityPlugin extends Plugin
         $result = [];
         foreach ($items as $item) {
             if (!is_array($item)) continue;
+            // 1.4.0 (B8): an item that writes or removes an attribute name outside the
+            // allowlist is never delivered, whether or not it carries an id. The
+            // sync answer names it (handleSyncPushEndpoint); here only the opt-in log.
+            $attributeRejection = \Grav\Plugin\SiteCheckAccessibility\AttributeNamePolicy::itemRejection($item);
+            if ($attributeRejection !== null) {
+                $this->pluginApplyDebug('ATTRIBUTE-NAME-REJECTED', [
+                    'type' => (string) ($item['type'] ?? ''),
+                    'selector' => (string) ($item['selector'] ?? ''),
+                    'error' => $attributeRejection,
+                ]);
+                continue;
+            }
             $scope = $this->normalizeOverrideScope($item['scope'] ?? null);
             $item['scope'] = $scope;
             $id = (string) ($item['id'] ?? '');
@@ -1120,8 +1136,16 @@ class SiteCheckAccessibilityPlugin extends Plugin
             }
 
             $type = trim((string) ($fix['type'] ?? 'alt_text_override'));
+            // 1.4.0 (B8): one gate for every fix type that names attributes, before
+            // the type-specific checks. Same error code as in the sync answer.
+            $attributeRejection = \Grav\Plugin\SiteCheckAccessibility\AttributeNamePolicy::itemRejection($fix);
 
-            if ($type === 'css_declaration_set' || $type === 'css_declaration_override') {
+            if ($attributeRejection !== null) {
+                $result = [
+                    'success' => false,
+                    'error' => $attributeRejection,
+                ];
+            } elseif ($type === 'css_declaration_set' || $type === 'css_declaration_override') {
                 $result = $this->upsertCssDeclarationOverride($fix);
             } elseif ($type === 'sibling_text_insert') {
                 $result = $this->upsertSiblingTextInsert($fix);
@@ -5732,11 +5756,20 @@ class SiteCheckAccessibilityPlugin extends Plugin
             'cachePath' => $this->getSignedCacheFilePath(),
         ]);
 
-        $this->sendJson([
+        // 1.4.0 (B8): the envelope is stored, but items with an attribute name outside
+        // the allowlist are never delivered (indexOverrideItemsById). Name them here,
+        // so a rejection is visible in the answer and not only on the page.
+        $rejectedOverrides = \Grav\Plugin\SiteCheckAccessibility\AttributeNamePolicy::rejectedItems($payloadDecoded['overrides'] ?? null);
+        $response = [
             'success' => true,
             'version' => $version,
             'issuedAt' => $issuedAt,
-        ]);
+        ];
+        if ($rejectedOverrides !== []) {
+            $this->pluginApplyDebug('SYNC-PUSH-ATTRIBUTE-NAMES-REJECTED', ['rejectedOverrides' => $rejectedOverrides]);
+            $response['rejectedOverrides'] = $rejectedOverrides;
+        }
+        $this->sendJson($response);
     }
 
     /**

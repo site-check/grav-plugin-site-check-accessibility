@@ -1,3 +1,25 @@
+# v1.4.1
+## 11/23/2026
+
+1. [](#improved)
+    * **`controls` as an allowed attribute name.** For a video or audio that starts with sound on its own, the web app now offers the choice `controls` next to `muted`: the browser's controls appear and the visitor can stop the sound. Up to 1.4.0 the connector answered that op with `attribute_not_allowed: controls`. `controls` is writable; it is not added to the names that may only be removed.
+    * The web app offers the choice only to sites whose connector reports at least this version; older connectors keep getting `muted` only.
+
+> **Re-deployment required.** The choice only takes effect on sites that run this version.
+
+> Found in the site-check test lab (criteria 2.2.2 and 1.4.2, run 2.5, G4 A4).
+
+# v1.4.0
+## 11/19/2026
+
+1. [](#improved)
+    * **Hardening: only allowed attribute names (B8).** An attribute op only had to name *some* attribute until now; a signed payload with `attribute: "onclick"` would have been written. The connector now writes only the names the web app produces: `alt`, `autocomplete`, `for`, `form`, `headers`, `id`, `lang`, `list`, `muted`, `role`, `scope`, `tabindex`, `title` and every `aria-*`. It removes those plus `autoplay`, `inert`, `novalidate`, `onfocus` and `onpaste` (taking a handler away never adds a script). Never `on*` as a write, never `style`, `src`, `href` or `class`, nothing with whitespace or control characters. The check covers `attribute`, `removeAttributes`, the `attributes` of `attribute_remove` and the `attributeOverrides` of `tag_replace` (new `lib/AttributeNamePolicy.php`, identical in all four connectors).
+    * A rejected op is never dropped silently: `/apply-fixes` answers it with `attribute_not_allowed: <name>`, `/sync-push` lists such items under `rejectedOverrides` (the rest of the envelope is stored and delivered), and the opt-in `apply-debug` log records them. The healthcheck reports the new `attribute-name-allowlist` feature.
+
+> **Re-deployment required.** The hardening only takes effect on sites that run this version. Every fix the web app produces today stays applicable; nothing changes on a page unless a payload names an attribute outside the list.
+
+> Found in the site-check test lab (criterion 4.1, K10 §6.5 / G4 B8).
+
 # v1.3.0
 ## 11/02/2026
 
